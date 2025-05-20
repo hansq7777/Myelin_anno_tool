@@ -3,3 +3,5 @@ __pycache__/
 *.tif
 results/
 
+*.tar.gz # 忽略所有 .tar.gz 压缩包
+*.tar.gz
