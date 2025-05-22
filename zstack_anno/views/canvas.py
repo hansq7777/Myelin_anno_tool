@@ -15,8 +15,9 @@ class SliceCanvas(QGraphicsView):
 
         self._image_item = None
         self._mask_item = None
+        self._zoom = 1.0
 
-    def set_image(self, arr: np.ndarray) -> None:
+    def set_image(self, arr: np.ndarray, reset_view: bool = False) -> None:
         """显示灰度图像。"""
         if arr.ndim != 2:
             raise ValueError("只支持 2-D 灰度图")
@@ -35,8 +36,18 @@ class SliceCanvas(QGraphicsView):
         if self._mask_item:
             self._mask_item.setZValue(1)
 
-        # 自适应窗口大小
-        self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+        if reset_view:
+            self.resetTransform()
+            self._zoom = 1.0
+            self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+
+    def wheelEvent(self, event):
+        angle = event.angleDelta().y()
+        if angle == 0:
+            return
+        factor = 1.25 if angle > 0 else 0.8
+        self._zoom *= factor
+        self.scale(factor, factor)
 
     def set_mask(self, mask: np.ndarray | None) -> None:
         """设置掩膜叠加，None 表示移除。"""
@@ -61,3 +72,4 @@ class SliceCanvas(QGraphicsView):
             self._mask_item.setZValue(1)
         else:
             self._mask_item.setPixmap(pix)
+

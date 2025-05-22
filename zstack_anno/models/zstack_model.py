@@ -11,13 +11,18 @@ class ZStackModel:
 
     def load(self, path: str) -> None:
         """Load a TIFF stack and reset masks."""
-        self.data = tifffile.imread(path)
-        print(
-            "Loaded shape:",
-            self.data.shape,
-            "dtype:",
-            self.data.dtype,
-        )  # Log loaded array shape and dtype
+        arr = tifffile.imread(path)
+        print("Loaded shape:", arr.shape, "dtype:", arr.dtype)
+
+        # Remove single-length axes (e.g. t=1, c=1)
+        arr = np.squeeze(arr)
+        # If still 4-D, assume first axis is channel/time and take first slice
+        if arr.ndim == 4:
+            arr = arr[0]
+        if arr.ndim != 3:
+            raise ValueError("Only 3-D stacks are supported")
+
+        self.data = arr
         self.index = 0
         self.masks = None
 
