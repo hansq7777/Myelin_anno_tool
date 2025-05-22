@@ -63,7 +63,7 @@ class MainController(QMainWindow):
             self.model.load(path)
             self.slider.setRange(0, self.model.n_slices - 1)
             self.slider.setEnabled(True)
-            self._update_view()
+            self._update_view(reset_view=True)
 
     def _open_masks(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -86,8 +86,8 @@ class MainController(QMainWindow):
         self.model.index = idx
         self._update_view()
 
-    def _update_view(self):
-        self.canvas.set_image(self.model.get_current())
+    def _update_view(self, reset_view: bool = False):
+        self.canvas.set_image(self.model.get_current(), reset_view=reset_view)
         mask = self.model.get_mask() if self.model.masks is not None else None
         self.canvas.set_mask(mask)
         self.statusBar().showMessage(
@@ -116,9 +116,9 @@ class MainController(QMainWindow):
     def keyPressEvent(self, event):
         if not self.slider.isEnabled():
             return
-        if event.key() in (Qt.Key_Up, Qt.Key_W):
+        if event.key() in (Qt.Key_Up, Qt.Key_Left, Qt.Key_W, Qt.Key_A):
             self.slider.setValue(max(0, self.slider.value() - 1))
-        elif event.key() in (Qt.Key_Down, Qt.Key_S):
+        elif event.key() in (Qt.Key_Down, Qt.Key_Right, Qt.Key_S):
             self.slider.setValue(min(self.model.n_slices - 1, self.slider.value() + 1))
         elif event.key() == Qt.Key_D:
             self._dilate_current()
@@ -161,3 +161,4 @@ class MainController(QMainWindow):
         self.undo_stack.append(self.model.masks.copy())
         self.model.masks = self.redo_stack.pop()
         self._update_view()
+
