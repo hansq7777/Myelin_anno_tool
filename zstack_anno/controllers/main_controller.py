@@ -4,8 +4,10 @@ from PyQt5.QtWidgets import (
     QSlider,
     QWidget,
     QVBoxLayout,
+    QMessageBox,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QEvent
+import sys
 import numpy as np
 from ..models.zstack_model import ZStackModel
 from ..views.canvas import SliceCanvas
@@ -22,6 +24,10 @@ class MainController(QMainWindow):
         self._build_layout()
         self._create_menu()
         self.statusBar().showMessage("Ready")
+        # Capture key events from child widgets
+        self.installEventFilter(self)
+        self.canvas.installEventFilter(self)
+        self.slider.installEventFilter(self)
 
     def _build_layout(self):
         central = QWidget()
@@ -39,6 +45,13 @@ class MainController(QMainWindow):
         file_menu = self.menuBar().addMenu("File")
         open_act = file_menu.addAction("Open…")
         open_act.triggered.connect(self._open_file)
+        if sys.platform == "darwin":
+            open_act.setShortcut("Meta+O")
+        else:
+            open_act.setShortcut("Alt+O")
+
+        new_mask_act = file_menu.addAction("New Mask Stack…")
+        new_mask_act.triggered.connect(self._create_masks)
 
         open_mask_act = file_menu.addAction("Open Masks…")
         open_mask_act.triggered.connect(self._open_masks)
@@ -57,6 +70,8 @@ class MainController(QMainWindow):
         redo_act.triggered.connect(self._redo)
 
     def _open_file(self):
+        if not self._prompt_save_if_dirty():
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, "Open TIFF", "", "TIFF Images (*.tif *.tiff *.ome.tif)")
         if path:
@@ -66,6 +81,8 @@ class MainController(QMainWindow):
             self._update_view(reset_view=True)
 
     def _open_masks(self):
+        if not self._prompt_save_if_dirty():
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Mask Stack", "", "TIFF Images (*.tif *.tiff)")
         if path:
@@ -76,9 +93,49 @@ class MainController(QMainWindow):
         if self.model.masks is None:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Masks", "", "TIFF Images (*.tif)")
+            self,
+            "Save Masks",
+            self.model.mask_path or (self.model.default_mask_path() if self.model.data is not None else ""),
+            "TIFF Images (*.tif)",
+        )
         if path:
             self.model.save_masks(path)
+
+    def _create_masks(self):
+        if self.model.data is None:
+            return
+        default = self.model.default_mask_path()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Create Mask Stack", default, "TIFF Images (*.tif)"
+        )
+        if path:
+            self.model.create_blank_masks(path)
+            self._update_view()
+
+    def _prompt_save_if_dirty(self) -> bool:
+        if not self.model.mask_dirty:
+            return True
+        ret = QMessageBox.question(
+            self,
+            "Save Masks",
+            "Save mask changes?",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes,
+        )
+        if ret == QMessageBox.Cancel:
+            return False
+        if ret == QMessageBox.Yes:
+            if self.model.mask_path is None:
+                self._save_masks()
+            else:
+                self.model.save_masks()
+        return True
+
+    def closeEvent(self, event):
+        if self._prompt_save_if_dirty():
+            super().closeEvent(event)
+        else:
+            event.ignore()
 
     def _on_slice_changed(self, idx: int):
         if self.model.data is None:
@@ -99,21 +156,21 @@ class MainController(QMainWindow):
         if self.model.data is None:
             return False
         if self.model.masks is None:
-            self.model.masks = np.zeros_like(self.model.data, dtype=np.uint8)
+            self.model.create_blank_masks()
         return True
 
     def _push_undo(self) -> None:
         if self.model.masks is None:
             return
         self.undo_stack.append(self.model.masks.copy())
-        if len(self.undo_stack) > 10:
+        if len(self.undo_stack) > 5:
             self.undo_stack.pop(0)
         self.redo_stack.clear()
 
     # --------- 文件操作 ---------
 
     # 键盘快捷
-    def keyPressEvent(self, event):
+    def _handle_key(self, event):
         if not self.slider.isEnabled():
             return
         if event.key() in (Qt.Key_Up, Qt.Key_Left, Qt.Key_W, Qt.Key_A):
@@ -137,6 +194,7 @@ class MainController(QMainWindow):
         cur = self.model.get_mask()
         new = morphology_tools.dilate(cur)
         self.model.set_mask(new)
+        self.model.save_masks()
         self._update_view()
 
     def _erode_current(self) -> None:
@@ -146,6 +204,7 @@ class MainController(QMainWindow):
         cur = self.model.get_mask()
         new = morphology_tools.erode(cur)
         self.model.set_mask(new)
+        self.model.save_masks()
         self._update_view()
 
     def _undo(self) -> None:
@@ -153,6 +212,7 @@ class MainController(QMainWindow):
             return
         self.redo_stack.append(self.model.masks.copy())
         self.model.masks = self.undo_stack.pop()
+        self.model.save_masks()
         self._update_view()
 
     def _redo(self) -> None:
@@ -160,5 +220,13 @@ class MainController(QMainWindow):
             return
         self.undo_stack.append(self.model.masks.copy())
         self.model.masks = self.redo_stack.pop()
+        self.model.save_masks()
         self._update_view()
+
+    # --------- event filter ---------
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress:
+            self._handle_key(event)
+            return True
+        return super().eventFilter(obj, event)
 
