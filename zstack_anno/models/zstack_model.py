@@ -6,10 +6,15 @@ class ZStackModel:
         self.data: np.ndarray | None = None
         self.index: int = 0
 
-	def load(self, path: str) -> None:
-    	self.data = tifffile.imread(path)
-    	print("Loaded shape:", self.data.shape, "dtype:", self.data.dtype)  # Log loaded array shape and dtype
-    	self.index = 0
+    def load(self, path: str) -> None:
+        self.data = tifffile.imread(path)
+        print(
+            "Loaded shape:",
+            self.data.shape,
+            "dtype:",
+            self.data.dtype,
+        )  # Log loaded array shape and dtype
+        self.index = 0
 
 
 
@@ -22,5 +27,3 @@ class ZStackModel:
         if self.data is None:
             raise RuntimeError("No image loaded")
         return self.data[self.index]
-        
-    
