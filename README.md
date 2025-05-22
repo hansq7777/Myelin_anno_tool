@@ -11,6 +11,5 @@ following commands:
 python -m zstack_anno      # execute the package
 # or
 python main.py             # run the helper script
-```
 
 This will launch the annotation window defined in `zstack_anno`.
