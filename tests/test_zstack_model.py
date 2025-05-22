@@ -10,6 +10,7 @@ if 'tifffile' not in sys.modules:
     sys.modules['tifffile'] = types.ModuleType('tifffile')
 
 from zstack_anno.models.zstack_model import ZStackModel
+import numpy as np
 
 class DummyArray:
     def __init__(self, data):
@@ -33,3 +34,16 @@ def test_n_slices_and_get_current():
 
     assert model.n_slices == 2
     assert model.get_current() == [[1, 2], [3, 4]]
+
+
+def test_set_and_get_mask():
+    model = ZStackModel()
+    model.data = np.zeros((2, 1, 1), dtype=np.uint8)
+    mask0 = np.array([[1]], dtype=np.uint8)
+    mask1 = np.array([[0]], dtype=np.uint8)
+    model.set_mask(mask0, slice_idx=0)
+    model.set_mask(mask1, slice_idx=1)
+
+    assert np.array_equal(model.get_mask(0), mask0)
+    assert np.array_equal(model.get_mask(1), mask1)
+
