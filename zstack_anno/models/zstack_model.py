@@ -2,11 +2,15 @@ import tifffile
 import numpy as np
 
 class ZStackModel:
+    """Model holding the currently loaded Z-stack image and masks."""
+
     def __init__(self):
         self.data: np.ndarray | None = None
+        self.masks: np.ndarray | None = None
         self.index: int = 0
 
     def load(self, path: str) -> None:
+        """Load a TIFF stack and reset masks."""
         self.data = tifffile.imread(path)
         print(
             "Loaded shape:",
@@ -15,6 +19,35 @@ class ZStackModel:
             self.data.dtype,
         )  # Log loaded array shape and dtype
         self.index = 0
+        self.masks = None
+
+    def load_masks(self, path: str) -> None:
+        """Load mask stack from a TIFF file."""
+        self.masks = tifffile.imread(path)
+
+    def save_masks(self, path: str) -> None:
+        """Save current mask stack as a TIFF file."""
+        if self.masks is None:
+            raise RuntimeError("No masks to save")
+        tifffile.imwrite(path, self.masks.astype(np.uint8))
+
+    def get_mask(self, slice_idx: int | None = None) -> np.ndarray:
+        """Return mask array for the given slice (defaults to current)."""
+        if self.masks is None:
+            raise RuntimeError("No masks loaded")
+        if slice_idx is None:
+            slice_idx = self.index
+        return self.masks[slice_idx]
+
+    def set_mask(self, mask: np.ndarray, slice_idx: int | None = None) -> None:
+        """Set mask for a slice. Creates mask stack if absent."""
+        if self.data is None:
+            raise RuntimeError("Image must be loaded before setting masks")
+        if self.masks is None:
+            self.masks = np.zeros_like(self.data, dtype=mask.dtype)
+        if slice_idx is None:
+            slice_idx = self.index
+        self.masks[slice_idx] = mask
 
 
 
