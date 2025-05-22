@@ -1,6 +1,6 @@
 import sys
 from PyQt5.QtWidgets import QApplication
-from .controllers.main_controller import MainController
+from zstack_anno.controllers.main_controller import MainController
 
 def main() -> None:
     app = QApplication(sys.argv)
