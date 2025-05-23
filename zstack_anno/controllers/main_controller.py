@@ -19,8 +19,9 @@ class MainController(QMainWindow):
         self.setWindowTitle("Z-Stack Annotation (alpha)")
         self.model = ZStackModel()
         self.canvas = SliceCanvas()
-        self.undo_stack: list[np.ndarray] = []
-        self.redo_stack: list[np.ndarray] = []
+        self.undo_stack: list[tuple[np.ndarray, str]] = []
+        self.redo_stack: list[tuple[np.ndarray, str]] = []
+        self.history: list[str] = []
         # Brush tool settings
         self.brush_enabled: bool = False
         self.brush_size: int = 5
@@ -165,12 +166,15 @@ class MainController(QMainWindow):
             self.model.create_blank_masks()
         return True
 
-    def _push_undo(self) -> None:
+    def _push_undo(self, action: str = "") -> None:
         if self.model.masks is None:
             return
-        self.undo_stack.append(self.model.masks.copy())
+        self.undo_stack.append((self.model.masks.copy(), action))
+        self.history.append(action)
         if len(self.undo_stack) > 5:
             self.undo_stack.pop(0)
+            if self.history:
+                self.history.pop(0)
         self.redo_stack.clear()
 
     # --------- 文件操作 ---------
@@ -187,9 +191,9 @@ class MainController(QMainWindow):
             self._dilate_current()
         elif event.key() == Qt.Key_E:
             self._erode_current()
-        elif event.key() == Qt.Key_Z and event.modifiers() & Qt.ControlModifier:
+        elif event.key() == Qt.Key_Z:
             self._undo()
-        elif event.key() == Qt.Key_Y and event.modifiers() & Qt.ControlModifier:
+        elif event.key() == Qt.Key_X:
             self._redo()
         elif event.key() == Qt.Key_P:
             self.brush_enabled = not self.brush_enabled
@@ -204,37 +208,38 @@ class MainController(QMainWindow):
     def _dilate_current(self) -> None:
         if not self._ensure_masks():
             return
-        self._push_undo()
+        self._push_undo("dilate")
         cur = self.model.get_mask()
         new = morphology_tools.dilate(cur)
         self.model.set_mask(new)
-        self.model.save_masks()
         self._update_view()
 
     def _erode_current(self) -> None:
         if not self._ensure_masks():
             return
-        self._push_undo()
+        self._push_undo("erode")
         cur = self.model.get_mask()
         new = morphology_tools.erode(cur)
         self.model.set_mask(new)
-        self.model.save_masks()
         self._update_view()
 
     def _undo(self) -> None:
         if not self.undo_stack:
             return
-        self.redo_stack.append(self.model.masks.copy())
-        self.model.masks = self.undo_stack.pop()
-        self.model.save_masks()
+        last_mask, action = self.undo_stack.pop()
+        self.redo_stack.append((self.model.masks.copy(), action))
+        self.model.masks = last_mask
+        if self.history:
+            self.history.pop()
         self._update_view()
 
     def _redo(self) -> None:
         if not self.redo_stack:
             return
-        self.undo_stack.append(self.model.masks.copy())
-        self.model.masks = self.redo_stack.pop()
-        self.model.save_masks()
+        last_mask, action = self.redo_stack.pop()
+        self.undo_stack.append((self.model.masks.copy(), action))
+        self.model.masks = last_mask
+        self.history.append(action)
         self._update_view()
 
     # --------- event filter ---------
@@ -272,13 +277,13 @@ class MainController(QMainWindow):
         x0 = max(0, x - half)
         x1 = min(mask.shape[1], x + half + 1)
         mask[y0:y1, x0:x1] = 1
-        self.model.set_mask(mask)
+        self.model.set_mask(mask, update_components=False)
         self.canvas.set_mask(mask)
 
     def _start_paint(self, pos) -> None:
         if self._painting:
             return
-        self._push_undo()
+        self._push_undo("paint")
         self._painting = True
         self._last_pos = pos
         self._paint_at(pos)
@@ -296,7 +301,6 @@ class MainController(QMainWindow):
             return
         self._painting = False
         self._last_pos = None
-        self.model.save_masks()
         self._update_view()
 
     def _paint_line(self, start, end) -> None:

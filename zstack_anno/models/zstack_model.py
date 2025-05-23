@@ -63,7 +63,12 @@ class ZStackModel:
             slice_idx = self.index
         return self.masks[slice_idx]
 
-    def set_mask(self, mask: np.ndarray, slice_idx: int | None = None) -> None:
+    def set_mask(
+        self,
+        mask: np.ndarray,
+        slice_idx: int | None = None,
+        update_components: bool = True,
+    ) -> None:
         """Set mask for a slice. Creates mask stack if absent."""
         if self.data is None:
             raise RuntimeError("Image must be loaded before setting masks")
@@ -73,7 +78,13 @@ class ZStackModel:
             slice_idx = self.index
         self.masks[slice_idx] = mask
         self.mask_dirty = True
-        self.update_components()
+        if update_components:
+            # lazily allocate components and update only the modified slice
+            if self.components is None:
+                self.components = np.zeros_like(self.masks, dtype=np.int32)
+            if self.components.shape != self.masks.shape:
+                self.components = np.zeros_like(self.masks, dtype=np.int32)
+            self.components[slice_idx] = label_components(mask)
 
     # --------- mask helpers ---------
     def default_mask_path(self) -> str:
@@ -91,7 +102,7 @@ class ZStackModel:
         self.mask_path = path
         tifffile.imwrite(self.mask_path, self.masks)
         self.mask_dirty = False
-        self.update_components()
+        self.components = np.zeros_like(self.masks, dtype=np.int32)
 
     def update_components(self) -> None:
         """Recompute connected component labels for all masks."""
