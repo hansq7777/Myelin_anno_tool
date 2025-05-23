@@ -123,3 +123,17 @@ class ZStackModel:
         if self.data is None:
             raise RuntimeError("No image loaded")
         return self.data[self.index]
+
+    def total_pixel_count(self) -> int:
+        """Return number of foreground pixels across all masks."""
+        if self.masks is None:
+            return 0
+        return int(self.masks.sum())
+
+    def component_count(self) -> int:
+        """Return total connected component count across the stack."""
+        if self.masks is None:
+            return 0
+        if self.components is None:
+            self.update_components()
+        return int(sum(self.components[i].max() for i in range(self.components.shape[0])))

@@ -79,3 +79,20 @@ def dilate_stack(stack: np.ndarray, iterations: int = 1) -> np.ndarray:
 def erode_stack(stack: np.ndarray, iterations: int = 1) -> np.ndarray:
     return np.stack([erode(slice_, iterations) for slice_ in stack])
 
+
+def remove_small(mask: np.ndarray, min_size: int) -> np.ndarray:
+    """Remove connected components smaller than ``min_size``."""
+    labels = label_components(mask)
+    if labels.max() == 0:
+        return mask.copy()
+    result = mask.copy()
+    for lbl in range(1, labels.max() + 1):
+        if np.sum(labels == lbl) < min_size:
+            result[labels == lbl] = 0
+    return result
+
+
+def remove_small_stack(stack: np.ndarray, min_size: int) -> np.ndarray:
+    """Apply ``remove_small`` to every slice of a stack."""
+    return np.stack([remove_small(slice_, min_size) for slice_ in stack])
+
