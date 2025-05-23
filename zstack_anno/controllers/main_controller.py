@@ -210,11 +210,12 @@ class MainController(QMainWindow):
 
     # --------- 辅助函数 ---------
     def _ensure_masks(self) -> bool:
-        """确保模型中存在掩膜栈，若无则创建全零栈。"""
+        """Ensure mask stack exists, allocating it in memory if necessary."""
         if self.model.data is None:
             return False
         if self.model.masks is None:
-            self.model.create_blank_masks()
+            # Create the mask stack in memory without writing to disk
+            self.model.ensure_masks()
         return True
 
     def _push_undo(self, action: str = "") -> None:

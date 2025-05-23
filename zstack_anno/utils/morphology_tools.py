@@ -1,14 +1,6 @@
 import numpy as np
 
 
-def _apply_single(mask: np.ndarray, func) -> np.ndarray:
-    """Apply a morphological function to a single 2-D mask."""
-    result = mask
-    for _ in range(1):
-        result = func(result)
-    return result
-
-
 def _dilate_once(arr: np.ndarray) -> np.ndarray:
     """Fast dilation using vectorised shifts."""
     padded = np.pad(arr, 1, mode="constant", constant_values=0)

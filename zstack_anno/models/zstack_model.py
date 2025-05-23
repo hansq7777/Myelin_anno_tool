@@ -104,6 +104,15 @@ class ZStackModel:
         self.mask_dirty = False
         self.components = np.zeros_like(self.masks, dtype=np.int32)
 
+    def ensure_masks(self) -> None:
+        """Ensure that an in-memory mask stack exists without writing to disk."""
+        if self.data is None:
+            raise RuntimeError("Image must be loaded before creating masks")
+        if self.masks is None:
+            self.masks = np.zeros_like(self.data, dtype=np.uint8)
+            self.components = np.zeros_like(self.masks, dtype=np.int32)
+            self.mask_dirty = False
+
     def update_components(self) -> None:
         """Recompute connected component labels for all masks."""
         if self.masks is None:
