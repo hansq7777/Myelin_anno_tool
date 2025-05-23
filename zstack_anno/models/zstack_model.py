@@ -19,10 +19,13 @@ class ZStackModel:
         self.path: str | None = None
         self.mask_path: str | None = None
         self.mask_dirty: bool = False
+        self.ome_metadata: str | None = None
 
     def load(self, path: str) -> None:
         """Load a TIFF stack and reset masks."""
-        arr = tifffile.imread(path)
+        with tifffile.TiffFile(path) as tif:
+            arr = tif.asarray()
+            self.ome_metadata = tif.ome_metadata
         print("Loaded shape:", arr.shape, "dtype:", arr.dtype)
 
         # Remove single-length axes (e.g. t=1, c=1)
@@ -175,3 +178,46 @@ class ZStackModel:
         mask = self.masks[slice_idx]
         new_mask = remove_mask_background(img, mask, percentile)
         self.set_mask(new_mask, slice_idx)
+
+    # --------- utility methods ---------
+    def delete_components_touching_rect(
+        self, slice_idx: int, x0: int, y0: int, x1: int, y1: int
+    ) -> None:
+        """Delete components that have any pixel within ``(x0,y0,x1,y1)``."""
+        if self.masks is None:
+            return
+        if self.components is None:
+            self.update_components()
+        mask = self.masks[slice_idx]
+        labels = self.components[slice_idx]
+        sub = labels[y0:y1, x0:x1]
+        to_del = np.unique(sub)
+        to_del = to_del[to_del > 0]
+        if to_del.size == 0:
+            return
+        new_mask = mask.copy()
+        for lbl in to_del:
+            new_mask[labels == lbl] = 0
+        self.set_mask(new_mask, slice_idx)
+
+    def truncate(self, start: int, end: int) -> None:
+        """Truncate the stack to ``start``-``end`` inclusive and note in OME."""
+        if self.data is None:
+            return
+        self.data = self.data[start : end + 1]
+        if self.original_data is not None:
+            self.original_data = self.original_data[start : end + 1]
+        if self.masks is not None:
+            self.masks = self.masks[start : end + 1]
+        if self.components is not None:
+            self.components = self.components[start : end + 1]
+        self.index = 0
+        if self.ome_metadata:
+            note = f"Truncated from slice {start} to {end}"
+            self.ome_metadata += f"\n<!-- {note} -->\n"
+
+    def save_stack(self, path: str) -> None:
+        """Save current image stack with OME metadata if available."""
+        if self.data is None:
+            raise RuntimeError("No image loaded")
+        tifffile.imwrite(path, self.data, ome=self.ome_metadata)
