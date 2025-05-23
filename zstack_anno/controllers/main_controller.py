@@ -31,6 +31,8 @@ class MainController(QMainWindow):
         # Capture key events from child widgets
         self.installEventFilter(self)
         self.canvas.installEventFilter(self)
+        # Also filter events from the canvas viewport for painting
+        self.canvas.viewport().installEventFilter(self)
         self.slider.installEventFilter(self)
 
     def _build_layout(self):
@@ -58,16 +60,16 @@ class MainController(QMainWindow):
         new_mask_act.triggered.connect(self._create_masks)
         # Shortcut for creating a new mask stack
         if sys.platform == "darwin":
-            new_mask_act.setShortcut("Meta+O")
+            new_mask_act.setShortcut("Meta+M")
         else:
-            new_mask_act.setShortcut("Alt+O")
+            new_mask_act.setShortcut("Alt+M")
 
         open_mask_act = file_menu.addAction("Open Masks…")
         open_mask_act.triggered.connect(self._open_masks)
         if sys.platform == "darwin":
-            open_mask_act.setShortcut("Meta+Shift+O")
+            open_mask_act.setShortcut("Meta+Shift+M")
         else:
-            open_mask_act.setShortcut("Alt+Shift+O")
+            open_mask_act.setShortcut("Alt+Shift+M")
         save_mask_act = file_menu.addAction("Save Masks…")
         save_mask_act.triggered.connect(self._save_masks)
 
@@ -251,7 +253,7 @@ class MainController(QMainWindow):
             return True
         if (
             self.brush_enabled
-            and obj is self.canvas
+            and obj in (self.canvas, self.canvas.viewport())
             and event.type() in (QEvent.MouseButtonPress, QEvent.MouseMove, QEvent.MouseButtonRelease)
         ):
             if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
