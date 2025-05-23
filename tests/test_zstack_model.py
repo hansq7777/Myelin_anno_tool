@@ -67,3 +67,14 @@ def test_update_components():
     labels = model.components[0]
     assert labels.max() == 2
 
+
+def test_counts():
+    model = ZStackModel()
+    model.data = np.zeros((2, 2, 2), dtype=np.uint8)
+    mask0 = np.array([[1, 0], [0, 1]], dtype=np.uint8)
+    mask1 = np.array([[0, 0], [1, 1]], dtype=np.uint8)
+    model.set_mask(mask0, slice_idx=0)
+    model.set_mask(mask1, slice_idx=1)
+    assert model.total_pixel_count() == 4
+    assert model.component_count() >= 1
+

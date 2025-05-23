@@ -4,6 +4,10 @@ from PyQt5.QtWidgets import (
     QSlider,
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QSpinBox,
     QMessageBox,
 )
 from PyQt5.QtCore import Qt, QEvent, QPoint
@@ -27,6 +31,7 @@ class MainController(QMainWindow):
         self.brush_size: int = 5
         self._painting: bool = False
         self._last_pos = None
+        self._temp_mask = None
         self._build_layout()
         self._create_menu()
         self.statusBar().showMessage("Ready")
@@ -42,11 +47,41 @@ class MainController(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
-        # -------- Slider --------
+        # -------- Controls --------
+        ctrl = QHBoxLayout()
+        self.prev_btn = QPushButton("Prev")
+        self.prev_btn.clicked.connect(self._prev_slice)
+        self.next_btn = QPushButton("Next")
+        self.next_btn.clicked.connect(self._next_slice)
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setEnabled(False)
         self.slider.valueChanged.connect(self._on_slice_changed)
-        layout.addWidget(self.slider)
+        ctrl.addWidget(self.prev_btn)
+        ctrl.addWidget(self.slider)
+        ctrl.addWidget(self.next_btn)
+
+        self.dilate_btn = QPushButton("Dilate")
+        self.dilate_btn.clicked.connect(self._dilate_current)
+        self.erode_btn = QPushButton("Erode")
+        self.erode_btn.clicked.connect(self._erode_current)
+        self.strength_spin = QSpinBox()
+        self.strength_spin.setRange(1, 10)
+        self.strength_spin.setValue(1)
+        ctrl.addWidget(self.dilate_btn)
+        ctrl.addWidget(self.erode_btn)
+        ctrl.addWidget(self.strength_spin)
+
+        self.filter_btn = QPushButton("Filter <")
+        self.filter_btn.clicked.connect(self._filter_small)
+        self.filter_spin = QSpinBox()
+        self.filter_spin.setRange(1, 10000)
+        self.filter_spin.setValue(100)
+        ctrl.addWidget(self.filter_btn)
+        ctrl.addWidget(self.filter_spin)
+
+        self.info_label = QLabel("")
+        ctrl.addWidget(self.info_label)
+        layout.addLayout(ctrl)
         self.setCentralWidget(central)
 
     def _create_menu(self):
@@ -150,12 +185,28 @@ class MainController(QMainWindow):
         self.model.index = idx
         self._update_view()
 
+    def _prev_slice(self):
+        if not self.slider.isEnabled():
+            return
+        self.slider.setValue(max(0, self.slider.value() - 1))
+
+    def _next_slice(self):
+        if not self.slider.isEnabled():
+            return
+        self.slider.setValue(min(self.model.n_slices - 1, self.slider.value() + 1))
+
     def _update_view(self, reset_view: bool = False):
         self.canvas.set_image(self.model.get_current(), reset_view=reset_view)
         mask = self.model.get_mask() if self.model.masks is not None else None
         self.canvas.set_mask(mask)
         self.statusBar().showMessage(
             f"Slice {self.model.index + 1} / {self.model.n_slices}")
+        info = (
+            f"Components: {self.model.component_count()}  "
+            f"Pixels: {self.model.total_pixel_count()}"
+        )
+        if hasattr(self, "info_label"):
+            self.info_label.setText(info)
 
     # --------- 辅助函数 ---------
     def _ensure_masks(self) -> bool:
@@ -210,7 +261,8 @@ class MainController(QMainWindow):
             return
         self._push_undo("dilate")
         cur = self.model.get_mask()
-        new = morphology_tools.dilate(cur)
+        iterations = self.strength_spin.value() if hasattr(self, "strength_spin") else 1
+        new = morphology_tools.dilate(cur, iterations=iterations)
         self.model.set_mask(new)
         self._update_view()
 
@@ -219,7 +271,18 @@ class MainController(QMainWindow):
             return
         self._push_undo("erode")
         cur = self.model.get_mask()
-        new = morphology_tools.erode(cur)
+        iterations = self.strength_spin.value() if hasattr(self, "strength_spin") else 1
+        new = morphology_tools.erode(cur, iterations=iterations)
+        self.model.set_mask(new)
+        self._update_view()
+
+    def _filter_small(self) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("filter")
+        cur = self.model.get_mask()
+        thresh = self.filter_spin.value() if hasattr(self, "filter_spin") else 100
+        new = morphology_tools.remove_small(cur, thresh)
         self.model.set_mask(new)
         self._update_view()
 
@@ -270,14 +333,15 @@ class MainController(QMainWindow):
         scene_pos = self.canvas.mapToScene(pos)
         x = int(scene_pos.x())
         y = int(scene_pos.y())
-        mask = self.model.get_mask().copy()
+        if self._temp_mask is None:
+            self._temp_mask = self.model.get_mask().copy()
+        mask = self._temp_mask
         half = self.brush_size // 2
         y0 = max(0, y - half)
         y1 = min(mask.shape[0], y + half + 1)
         x0 = max(0, x - half)
         x1 = min(mask.shape[1], x + half + 1)
         mask[y0:y1, x0:x1] = 1
-        self.model.set_mask(mask, update_components=False)
         self.canvas.set_mask(mask)
 
     def _start_paint(self, pos) -> None:
@@ -286,6 +350,7 @@ class MainController(QMainWindow):
         self._push_undo("paint")
         self._painting = True
         self._last_pos = pos
+        self._temp_mask = self.model.get_mask().copy()
         self._paint_at(pos)
 
     def _continue_paint(self, pos) -> None:
@@ -300,6 +365,9 @@ class MainController(QMainWindow):
         if not self._painting:
             return
         self._painting = False
+        if self._temp_mask is not None:
+            self.model.set_mask(self._temp_mask)
+        self._temp_mask = None
         self._last_pos = None
         self._update_view()
 
