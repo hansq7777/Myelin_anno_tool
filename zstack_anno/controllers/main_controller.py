@@ -33,6 +33,7 @@ class MainController(QMainWindow):
         self._painting: bool = False
         self._last_pos = None
         self._temp_mask = None
+        self._delete_start = None
         self._build_layout()
         self._create_menu()
         self.statusBar().showMessage("Ready")
@@ -255,9 +256,9 @@ class MainController(QMainWindow):
     def _handle_key(self, event):
         if not self.slider.isEnabled():
             return
-        if event.key() in (Qt.Key_Up, Qt.Key_Left, Qt.Key_W, Qt.Key_A):
+        if event.key() in (Qt.Key_Up, Qt.Key_Left):
             self.slider.setValue(max(0, self.slider.value() - 1))
-        elif event.key() in (Qt.Key_Down, Qt.Key_Right, Qt.Key_S):
+        elif event.key() in (Qt.Key_Down, Qt.Key_Right):
             self.slider.setValue(min(self.model.n_slices - 1, self.slider.value() + 1))
         elif event.key() == Qt.Key_D:
             self._dilate_current()
@@ -271,6 +272,10 @@ class MainController(QMainWindow):
             self.brush_enabled = not self.brush_enabled
             self.statusBar().showMessage(
                 "Brush ON" if self.brush_enabled else "Brush OFF")
+        elif event.key() == Qt.Key_H:
+            self.brush_enabled = False
+            self.canvas.setDragMode(self.canvas.ScrollHandDrag)
+            self.statusBar().showMessage("Hand tool")
         elif event.key() == Qt.Key_BracketLeft:
             self.brush_size = max(1, self.brush_size - 1)
         elif event.key() == Qt.Key_BracketRight:
@@ -372,6 +377,15 @@ class MainController(QMainWindow):
             if event.type() == QEvent.MouseButtonRelease:
                 self._end_paint()
                 return True
+        if obj in (self.canvas, self.canvas.viewport()):
+            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.RightButton:
+                self._delete_start = event.pos()
+                return True
+            if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.RightButton:
+                if self._delete_start is not None:
+                    self._delete_rect(self._delete_start, event.pos())
+                    self._delete_start = None
+                return True
         return super().eventFilter(obj, event)
 
     # --------- painting helpers ---------
@@ -431,4 +445,17 @@ class MainController(QMainWindow):
             x = int(round(start.x() + dx * i / steps))
             y = int(round(start.y() + dy * i / steps))
             self._paint_at(QPoint(x, y))
+
+    def _delete_rect(self, start, end) -> None:
+        """Delete entire components that touch the dragged rectangle."""
+        if self.model.masks is None:
+            return
+        scene_start = self.canvas.mapToScene(start)
+        scene_end = self.canvas.mapToScene(end)
+        x0 = int(min(scene_start.x(), scene_end.x()))
+        x1 = int(max(scene_start.x(), scene_end.x())) + 1
+        y0 = int(min(scene_start.y(), scene_end.y()))
+        y1 = int(max(scene_start.y(), scene_end.y())) + 1
+        self.model.delete_components_touching_rect(self.model.index, x0, y0, x1, y1)
+        self._update_view()
 
