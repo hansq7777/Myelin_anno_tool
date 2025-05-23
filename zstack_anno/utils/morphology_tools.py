@@ -88,3 +88,47 @@ def remove_small_stack(stack: np.ndarray, min_size: int) -> np.ndarray:
     """Apply ``remove_small`` to every slice of a stack."""
     return np.stack([remove_small(slice_, min_size) for slice_ in stack])
 
+
+def histogram_stretch(slice_: np.ndarray, percentile: float) -> np.ndarray:
+    """Stretch contrast of a slice using percentile exclusion."""
+    low = np.percentile(slice_, percentile)
+    high = np.percentile(slice_, 100 - percentile)
+    if high <= low:
+        return slice_.copy()
+    scaled = (slice_ - low) / (high - low)
+    scaled = np.clip(scaled, 0, 1)
+    if np.issubdtype(slice_.dtype, np.integer):
+        info = np.iinfo(slice_.dtype)
+        scaled = (scaled * info.max).astype(slice_.dtype)
+    else:
+        scaled = scaled.astype(slice_.dtype)
+    return scaled
+
+
+def histogram_stretch_stack(stack: np.ndarray, percentile: float) -> np.ndarray:
+    """Apply ``histogram_stretch`` to every slice of a stack."""
+    return np.stack([histogram_stretch(s, percentile) for s in stack])
+
+
+def remove_mask_background(
+    image: np.ndarray, mask: np.ndarray, percentile: float
+) -> np.ndarray:
+    """Remove lowest intensity pixels within ``mask`` based on percentile."""
+    values = image[mask > 0]
+    if values.size == 0:
+        return mask.copy()
+    thresh = np.percentile(values, percentile)
+    result = mask.copy()
+    result[(mask > 0) & (image <= thresh)] = 0
+    return result
+
+
+def remove_mask_background_stack(
+    images: np.ndarray, masks: np.ndarray, percentile: float
+) -> np.ndarray:
+    """Apply ``remove_mask_background`` on each slice pair of images and masks."""
+    result = []
+    for img, msk in zip(images, masks):
+        result.append(remove_mask_background(img, msk, percentile))
+    return np.stack(result)
+

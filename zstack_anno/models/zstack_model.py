@@ -1,13 +1,18 @@
 import os
 import tifffile
 import numpy as np
-from ..utils.morphology_tools import label_components
+from ..utils.morphology_tools import (
+    label_components,
+    histogram_stretch_stack,
+    remove_mask_background,
+)
 
 class ZStackModel:
     """Model holding the currently loaded Z-stack image and masks."""
 
     def __init__(self):
         self.data: np.ndarray | None = None
+        self.original_data: np.ndarray | None = None
         self.masks: np.ndarray | None = None
         self.components: np.ndarray | None = None
         self.index: int = 0
@@ -29,6 +34,7 @@ class ZStackModel:
             raise ValueError("Only 3-D stacks are supported")
 
         self.data = arr
+        self.original_data = arr.copy()
         self.index = 0
         self.masks = None
         self.components = None
@@ -146,3 +152,26 @@ class ZStackModel:
         if self.components is None:
             self.update_components()
         return int(sum(self.components[i].max() for i in range(self.components.shape[0])))
+
+    # --------- image utilities ---------
+    def histogram_stretch(self, percentile: float) -> None:
+        """Apply histogram stretch to the entire stack."""
+        if self.original_data is None:
+            raise RuntimeError("Image not loaded")
+        self.data = histogram_stretch_stack(self.original_data, percentile)
+
+    def reset_contrast(self) -> None:
+        """Revert ``data`` to the original loaded image."""
+        if self.original_data is not None:
+            self.data = self.original_data.copy()
+
+    def remove_background(self, percentile: float, slice_idx: int | None = None) -> None:
+        """Remove low intensity pixels from the mask on ``slice_idx``."""
+        if self.data is None or self.masks is None:
+            return
+        if slice_idx is None:
+            slice_idx = self.index
+        img = self.data[slice_idx]
+        mask = self.masks[slice_idx]
+        new_mask = remove_mask_background(img, mask, percentile)
+        self.set_mask(new_mask, slice_idx)

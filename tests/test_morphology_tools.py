@@ -8,6 +8,8 @@ from zstack_anno.utils.morphology_tools import (
     erode,
     label_components,
     remove_small,
+    histogram_stretch_stack,
+    remove_mask_background,
 )
 
 
@@ -51,5 +53,21 @@ def test_remove_small():
          [0, 0, 0]],
         dtype=np.uint8,
     )
+    assert np.array_equal(filtered, expected)
+
+
+def test_histogram_stretch_stack():
+    stack = np.array([[[0, 10], [20, 30]]], dtype=np.uint8)
+    stretched = histogram_stretch_stack(stack, 25)
+    assert stretched.shape == stack.shape
+    assert stretched.min() == 0
+    assert stretched.max() == 255
+
+
+def test_remove_mask_background():
+    img = np.array([[10, 20], [30, 40]], dtype=np.uint8)
+    mask = np.ones_like(img, dtype=np.uint8)
+    filtered = remove_mask_background(img, mask, 50)
+    expected = np.array([[0, 0], [1, 1]], dtype=np.uint8)
     assert np.array_equal(filtered, expected)
 
