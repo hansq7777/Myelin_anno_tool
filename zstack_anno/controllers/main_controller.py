@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QPushButton,
+    QLineEdit,
     QLabel,
     QSpinBox,
     QMessageBox,
@@ -78,6 +79,25 @@ class MainController(QMainWindow):
         self.filter_spin.setValue(100)
         ctrl.addWidget(self.filter_btn)
         ctrl.addWidget(self.filter_spin)
+
+        # Background filtering
+        self.bg_percentile_edit = QLineEdit()
+        self.bg_percentile_edit.setPlaceholderText("BG %")
+        self.bg_filter_button = QPushButton("BG Filter")
+        self.bg_filter_button.clicked.connect(self._apply_bg_filter)
+        ctrl.addWidget(self.bg_percentile_edit)
+        ctrl.addWidget(self.bg_filter_button)
+
+        # Histogram stretch
+        self.stretch_edit = QLineEdit()
+        self.stretch_edit.setPlaceholderText("Stretch %")
+        self.stretch_button = QPushButton("Stretch")
+        self.stretch_button.clicked.connect(self._apply_stretch)
+        self.reset_stretch_button = QPushButton("Reset")
+        self.reset_stretch_button.clicked.connect(self._reset_stretch)
+        ctrl.addWidget(self.stretch_edit)
+        ctrl.addWidget(self.stretch_button)
+        ctrl.addWidget(self.reset_stretch_button)
 
         self.info_label = QLabel("")
         ctrl.addWidget(self.info_label)
@@ -286,6 +306,33 @@ class MainController(QMainWindow):
         new = morphology_tools.remove_small(cur, thresh)
         self.model.set_mask(new)
         self._update_view()
+
+    def _apply_bg_filter(self) -> None:
+        if not self._ensure_masks():
+            return
+        try:
+            pct = float(self.bg_percentile_edit.text())
+        except ValueError:
+            pct = 0.0
+        self._push_undo("bg_filter")
+        self.model.remove_background(pct)
+        self._update_view()
+
+    def _apply_stretch(self) -> None:
+        if self.model.data is None:
+            return
+        try:
+            pct = float(self.stretch_edit.text())
+        except ValueError:
+            pct = 0.0
+        self.model.histogram_stretch(pct)
+        self._update_view(reset_view=True)
+
+    def _reset_stretch(self) -> None:
+        if self.model.data is None:
+            return
+        self.model.reset_contrast()
+        self._update_view(reset_view=True)
 
     def _undo(self) -> None:
         if not self.undo_stack:
