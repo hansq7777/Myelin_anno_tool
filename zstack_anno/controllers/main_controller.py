@@ -21,6 +21,10 @@ class MainController(QMainWindow):
         self.canvas = SliceCanvas()
         self.undo_stack: list[np.ndarray] = []
         self.redo_stack: list[np.ndarray] = []
+        # Brush tool settings
+        self.brush_enabled: bool = False
+        self.brush_size: int = 5
+        self._painting: bool = False
         self._build_layout()
         self._create_menu()
         self.statusBar().showMessage("Ready")
@@ -52,9 +56,18 @@ class MainController(QMainWindow):
 
         new_mask_act = file_menu.addAction("New Mask Stack…")
         new_mask_act.triggered.connect(self._create_masks)
+        # Shortcut for creating a new mask stack
+        if sys.platform == "darwin":
+            new_mask_act.setShortcut("Meta+O")
+        else:
+            new_mask_act.setShortcut("Alt+O")
 
         open_mask_act = file_menu.addAction("Open Masks…")
         open_mask_act.triggered.connect(self._open_masks)
+        if sys.platform == "darwin":
+            open_mask_act.setShortcut("Meta+Shift+O")
+        else:
+            open_mask_act.setShortcut("Alt+Shift+O")
         save_mask_act = file_menu.addAction("Save Masks…")
         save_mask_act.triggered.connect(self._save_masks)
 
@@ -185,6 +198,14 @@ class MainController(QMainWindow):
             self._undo()
         elif event.key() == Qt.Key_Y and event.modifiers() & Qt.ControlModifier:
             self._redo()
+        elif event.key() == Qt.Key_P:
+            self.brush_enabled = not self.brush_enabled
+            self.statusBar().showMessage(
+                "Brush ON" if self.brush_enabled else "Brush OFF")
+        elif event.key() == Qt.Key_BracketLeft:
+            self.brush_size = max(1, self.brush_size - 1)
+        elif event.key() == Qt.Key_BracketRight:
+            self.brush_size += 1
 
     # --------- 形态学与撤销重做 ---------
     def _dilate_current(self) -> None:
@@ -228,5 +249,55 @@ class MainController(QMainWindow):
         if event.type() == QEvent.KeyPress:
             self._handle_key(event)
             return True
+        if (
+            self.brush_enabled
+            and obj is self.canvas
+            and event.type() in (QEvent.MouseButtonPress, QEvent.MouseMove, QEvent.MouseButtonRelease)
+        ):
+            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                self._start_paint(event.pos())
+                return True
+            if event.type() == QEvent.MouseMove and event.buttons() & Qt.LeftButton:
+                self._continue_paint(event.pos())
+                return True
+            if event.type() == QEvent.MouseButtonRelease:
+                self._end_paint()
+                return True
         return super().eventFilter(obj, event)
+
+    # --------- painting helpers ---------
+    def _paint_at(self, pos) -> None:
+        if not self._ensure_masks():
+            return
+        scene_pos = self.canvas.mapToScene(pos)
+        x = int(scene_pos.x())
+        y = int(scene_pos.y())
+        mask = self.model.get_mask().copy()
+        half = self.brush_size // 2
+        y0 = max(0, y - half)
+        y1 = min(mask.shape[0], y + half + 1)
+        x0 = max(0, x - half)
+        x1 = min(mask.shape[1], x + half + 1)
+        mask[y0:y1, x0:x1] = 1
+        self.model.set_mask(mask)
+        self.canvas.set_mask(mask)
+
+    def _start_paint(self, pos) -> None:
+        if self._painting:
+            return
+        self._push_undo()
+        self._painting = True
+        self._paint_at(pos)
+
+    def _continue_paint(self, pos) -> None:
+        if not self._painting:
+            return
+        self._paint_at(pos)
+
+    def _end_paint(self) -> None:
+        if not self._painting:
+            return
+        self._painting = False
+        self.model.save_masks()
+        self._update_view()
 
