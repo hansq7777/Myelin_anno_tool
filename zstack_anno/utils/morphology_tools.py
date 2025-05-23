@@ -1,5 +1,10 @@
 import numpy as np
 
+try:
+    from scipy.ndimage import gaussian_filter  # type: ignore
+except Exception:  # pragma: no cover - scipy may be unavailable
+    gaussian_filter = None
+
 
 def _dilate_once(arr: np.ndarray) -> np.ndarray:
     """Fast dilation using vectorised shifts."""
@@ -131,4 +136,36 @@ def remove_mask_background_stack(
     for img, msk in zip(images, masks):
         result.append(remove_mask_background(img, msk, percentile))
     return np.stack(result)
+
+
+def _gaussian_blur_slice_numpy(slice_: np.ndarray, sigma: float) -> np.ndarray:
+    """Gaussian blur implementation using only NumPy."""
+    radius = max(1, int(3 * sigma))
+    ax = np.arange(-radius, radius + 1)
+    kernel1d = np.exp(-(ax**2) / (2 * sigma**2))
+    kernel1d /= kernel1d.sum()
+    kernel2d = np.outer(kernel1d, kernel1d)
+    pad = np.pad(slice_, radius, mode="edge").astype(float)
+    h, w = slice_.shape
+    out = np.zeros((h, w), dtype=float)
+    for y in range(h):
+        for x in range(w):
+            region = pad[y : y + 2 * radius + 1, x : x + 2 * radius + 1]
+            out[y, x] = np.sum(region * kernel2d)
+    if np.issubdtype(slice_.dtype, np.integer):
+        info = np.iinfo(slice_.dtype)
+        out = np.clip(out, 0, info.max)
+    return out.astype(slice_.dtype)
+
+
+def gaussian_blur_slice(slice_: np.ndarray, sigma: float) -> np.ndarray:
+    """Blur a single slice with Gaussian kernel."""
+    if gaussian_filter is not None:  # pragma: no cover - optional dependency
+        return gaussian_filter(slice_, sigma=sigma)
+    return _gaussian_blur_slice_numpy(slice_, sigma)
+
+
+def gaussian_blur_stack(stack: np.ndarray, sigma: float) -> np.ndarray:
+    """Apply ``gaussian_blur_slice`` to each slice of a stack."""
+    return np.stack([gaussian_blur_slice(s, sigma) for s in stack])
 
