@@ -1,11 +1,17 @@
 import sys
 import types
+from pathlib import Path
+import importlib
+import pytest
+
+root = Path(__file__).resolve().parents[1]
+if str(root) not in sys.path:
+    sys.path.insert(0, str(root))
 
 # Provide minimal stubs for numpy and tifffile if they are missing
-if 'numpy' not in sys.modules:
-    np_stub = types.ModuleType('numpy')
-    np_stub.ndarray = object
-    sys.modules['numpy'] = np_stub
+np_spec = importlib.util.find_spec('numpy')
+if np_spec is None:
+    pytest.skip("numpy not available", allow_module_level=True)
 if 'tifffile' not in sys.modules:
     sys.modules['tifffile'] = types.ModuleType('tifffile')
 
@@ -46,4 +52,18 @@ def test_set_and_get_mask():
 
     assert np.array_equal(model.get_mask(0), mask0)
     assert np.array_equal(model.get_mask(1), mask1)
+
+
+def test_update_components():
+    model = ZStackModel()
+    model.data = np.zeros((1, 3, 3), dtype=np.uint8)
+    mask = np.array(
+        [[1, 0, 0],
+         [1, 1, 0],
+         [0, 0, 1]],
+        dtype=np.uint8,
+    )
+    model.set_mask(mask, slice_idx=0)
+    labels = model.components[0]
+    assert labels.max() == 2
 

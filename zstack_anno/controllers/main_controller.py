@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QMessageBox,
 )
-from PyQt5.QtCore import Qt, QEvent
+from PyQt5.QtCore import Qt, QEvent, QPoint
 import sys
 import numpy as np
 from ..models.zstack_model import ZStackModel
@@ -25,6 +25,7 @@ class MainController(QMainWindow):
         self.brush_enabled: bool = False
         self.brush_size: int = 5
         self._painting: bool = False
+        self._last_pos = None
         self._build_layout()
         self._create_menu()
         self.statusBar().showMessage("Ready")
@@ -51,25 +52,15 @@ class MainController(QMainWindow):
         file_menu = self.menuBar().addMenu("File")
         open_act = file_menu.addAction("Open…")
         open_act.triggered.connect(self._open_file)
-        if sys.platform == "darwin":
-            open_act.setShortcut("Meta+O")
-        else:
-            open_act.setShortcut("Alt+O")
+        open_act.setShortcuts(["Ctrl+O", "Meta+O"])
 
         new_mask_act = file_menu.addAction("New Mask Stack…")
         new_mask_act.triggered.connect(self._create_masks)
-        # Shortcut for creating a new mask stack
-        if sys.platform == "darwin":
-            new_mask_act.setShortcut("Meta+M")
-        else:
-            new_mask_act.setShortcut("Alt+M")
+        new_mask_act.setShortcuts(["Ctrl+M", "Meta+M"])
 
         open_mask_act = file_menu.addAction("Open Masks…")
         open_mask_act.triggered.connect(self._open_masks)
-        if sys.platform == "darwin":
-            open_mask_act.setShortcut("Meta+Shift+M")
-        else:
-            open_mask_act.setShortcut("Alt+Shift+M")
+        open_mask_act.setShortcuts(["Ctrl+Shift+M", "Meta+Shift+M"])
         save_mask_act = file_menu.addAction("Save Masks…")
         save_mask_act.triggered.connect(self._save_masks)
 
@@ -289,17 +280,35 @@ class MainController(QMainWindow):
             return
         self._push_undo()
         self._painting = True
+        self._last_pos = pos
         self._paint_at(pos)
 
     def _continue_paint(self, pos) -> None:
         if not self._painting:
             return
-        self._paint_at(pos)
+        if self._last_pos is None:
+            self._last_pos = pos
+        self._paint_line(self._last_pos, pos)
+        self._last_pos = pos
 
     def _end_paint(self) -> None:
         if not self._painting:
             return
         self._painting = False
+        self._last_pos = None
         self.model.save_masks()
         self._update_view()
+
+    def _paint_line(self, start, end) -> None:
+        """Interpolate between points to draw a continuous line."""
+        dx = end.x() - start.x()
+        dy = end.y() - start.y()
+        steps = int(max(abs(dx), abs(dy)))
+        if steps == 0:
+            self._paint_at(start)
+            return
+        for i in range(steps + 1):
+            x = int(round(start.x() + dx * i / steps))
+            y = int(round(start.y() + dy * i / steps))
+            self._paint_at(QPoint(x, y))
 

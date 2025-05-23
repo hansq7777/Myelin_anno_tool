@@ -46,7 +46,7 @@ class SliceCanvas(QGraphicsView):
         if angle == 0:
             return
         # Use a smaller scaling factor for smoother zooming
-        factor = 1.1 if angle > 0 else 0.9
+        factor = 1.02 if angle > 0 else 0.98
         self._zoom *= factor
         self.scale(factor, factor)
 

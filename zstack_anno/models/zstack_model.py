@@ -1,6 +1,7 @@
 import os
 import tifffile
 import numpy as np
+from ..utils.morphology_tools import label_components
 
 class ZStackModel:
     """Model holding the currently loaded Z-stack image and masks."""
@@ -8,6 +9,7 @@ class ZStackModel:
     def __init__(self):
         self.data: np.ndarray | None = None
         self.masks: np.ndarray | None = None
+        self.components: np.ndarray | None = None
         self.index: int = 0
         self.path: str | None = None
         self.mask_path: str | None = None
@@ -29,6 +31,7 @@ class ZStackModel:
         self.data = arr
         self.index = 0
         self.masks = None
+        self.components = None
         self.path = path
         self.mask_path = None
         self.mask_dirty = False
@@ -38,6 +41,7 @@ class ZStackModel:
         self.masks = tifffile.imread(path)
         self.mask_path = path
         self.mask_dirty = False
+        self.update_components()
 
     def save_masks(self, path: str | None = None) -> None:
         """Save current mask stack as a TIFF file."""
@@ -69,6 +73,7 @@ class ZStackModel:
             slice_idx = self.index
         self.masks[slice_idx] = mask
         self.mask_dirty = True
+        self.update_components()
 
     # --------- mask helpers ---------
     def default_mask_path(self) -> str:
@@ -86,6 +91,15 @@ class ZStackModel:
         self.mask_path = path
         tifffile.imwrite(self.mask_path, self.masks)
         self.mask_dirty = False
+        self.update_components()
+
+    def update_components(self) -> None:
+        """Recompute connected component labels for all masks."""
+        if self.masks is None:
+            self.components = None
+            return
+        labeled = [label_components(slice_) for slice_ in self.masks]
+        self.components = np.stack(labeled)
 
 
 

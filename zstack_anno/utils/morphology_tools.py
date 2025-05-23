@@ -10,22 +10,24 @@ def _apply_single(mask: np.ndarray, func) -> np.ndarray:
 
 
 def _dilate_once(arr: np.ndarray) -> np.ndarray:
+    """Fast dilation using vectorised shifts."""
     padded = np.pad(arr, 1, mode="constant", constant_values=0)
+    h, w = arr.shape
     out = np.zeros_like(arr)
-    for i in range(arr.shape[0]):
-        for j in range(arr.shape[1]):
-            window = padded[i:i+3, j:j+3]
-            out[i, j] = 1 if np.any(window) else 0
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            out = np.maximum(out, padded[1 + dy : 1 + dy + h, 1 + dx : 1 + dx + w])
     return out
 
 
 def _erode_once(arr: np.ndarray) -> np.ndarray:
+    """Fast erosion using vectorised shifts."""
     padded = np.pad(arr, 1, mode="constant", constant_values=1)
-    out = np.zeros_like(arr)
-    for i in range(arr.shape[0]):
-        for j in range(arr.shape[1]):
-            window = padded[i:i+3, j:j+3]
-            out[i, j] = 1 if np.all(window) else 0
+    h, w = arr.shape
+    out = np.ones_like(arr)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            out = np.minimum(out, padded[1 + dy : 1 + dy + h, 1 + dx : 1 + dx + w])
     return out
 
 
@@ -41,6 +43,33 @@ def erode(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
     for _ in range(iterations):
         result = _erode_once(result)
     return result
+
+
+def label_components(mask: np.ndarray) -> np.ndarray:
+    """Label connected components in a binary mask."""
+    h, w = mask.shape
+    labels = np.zeros((h, w), dtype=np.int32)
+    current = 0
+    for y in range(h):
+        for x in range(w):
+            if mask[y, x] and labels[y, x] == 0:
+                current += 1
+                stack = [(y, x)]
+                labels[y, x] = current
+                while stack:
+                    cy, cx = stack.pop()
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            ny, nx = cy + dy, cx + dx
+                            if (
+                                0 <= ny < h
+                                and 0 <= nx < w
+                                and mask[ny, nx]
+                                and labels[ny, nx] == 0
+                            ):
+                                labels[ny, nx] = current
+                                stack.append((ny, nx))
+    return labels
 
 
 def dilate_stack(stack: np.ndarray, iterations: int = 1) -> np.ndarray:
