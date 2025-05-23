@@ -48,6 +48,9 @@ class MainController(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.title_label = QLabel("Z-Stack Annotation")
+        self.title_label.setAlignment(Qt.AlignHCenter)
+        layout.addWidget(self.title_label)
         layout.addWidget(self.canvas)
         # -------- Controls --------
         ctrl = QHBoxLayout()
@@ -99,6 +102,21 @@ class MainController(QMainWindow):
         ctrl.addWidget(self.stretch_edit)
         ctrl.addWidget(self.stretch_button)
         ctrl.addWidget(self.reset_stretch_button)
+
+        # Gaussian blur controls
+        self.blur_btn = QPushButton("Blur")
+        self.blur_btn.clicked.connect(self._apply_blur)
+        self.blur_spin = QSpinBox()
+        self.blur_spin.setRange(1, 10)
+        self.blur_spin.setValue(1)
+        self.show_orig_btn = QPushButton("Show Original")
+        self.show_orig_btn.clicked.connect(self._toggle_original)
+        self.clear_blur_btn = QPushButton("Clear Blur")
+        self.clear_blur_btn.clicked.connect(self._clear_blur)
+        ctrl.addWidget(self.blur_btn)
+        ctrl.addWidget(self.blur_spin)
+        ctrl.addWidget(self.show_orig_btn)
+        ctrl.addWidget(self.clear_blur_btn)
 
         self.info_label = QLabel("")
         ctrl.addWidget(self.info_label)
@@ -337,6 +355,21 @@ class MainController(QMainWindow):
         if self.model.data is None:
             return
         self.model.reset_contrast()
+        self._update_view(reset_view=True)
+
+    def _apply_blur(self) -> None:
+        if self.model.data is None:
+            return
+        sigma = float(self.blur_spin.value()) if hasattr(self, "blur_spin") else 1.0
+        self.model.apply_gaussian_blur(sigma)
+        self._update_view(reset_view=True)
+
+    def _toggle_original(self) -> None:
+        self.model.toggle_show_original()
+        self._update_view(reset_view=True)
+
+    def _clear_blur(self) -> None:
+        self.model.remove_gaussian_blur()
         self._update_view(reset_view=True)
 
     def _undo(self) -> None:

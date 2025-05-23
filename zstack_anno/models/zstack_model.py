@@ -5,6 +5,7 @@ from ..utils.morphology_tools import (
     label_components,
     histogram_stretch_stack,
     remove_mask_background,
+    gaussian_blur_stack,
 )
 
 class ZStackModel:
@@ -20,6 +21,9 @@ class ZStackModel:
         self.mask_path: str | None = None
         self.mask_dirty: bool = False
         self.ome_metadata: str | None = None
+        self.data_before_blur: np.ndarray | None = None
+        self.is_blurred: bool = False
+        self.show_original: bool = False
 
     def load(self, path: str) -> None:
         """Load a TIFF stack and reset masks."""
@@ -88,12 +92,7 @@ class ZStackModel:
         self.masks[slice_idx] = mask
         self.mask_dirty = True
         if update_components:
-            # lazily allocate components and update only the modified slice
-            if self.components is None:
-                self.components = np.zeros_like(self.masks, dtype=np.int32)
-            if self.components.shape != self.masks.shape:
-                self.components = np.zeros_like(self.masks, dtype=np.int32)
-            self.components[slice_idx] = label_components(mask)
+            self.update_components()
 
     # --------- mask helpers ---------
     def default_mask_path(self) -> str:
@@ -140,6 +139,8 @@ class ZStackModel:
     def get_current(self) -> np.ndarray:
         if self.data is None:
             raise RuntimeError("No image loaded")
+        if self.show_original and self.data_before_blur is not None:
+            return self.data_before_blur[self.index]
         return self.data[self.index]
 
     def total_pixel_count(self) -> int:
@@ -167,6 +168,31 @@ class ZStackModel:
         """Revert ``data`` to the original loaded image."""
         if self.original_data is not None:
             self.data = self.original_data.copy()
+
+    def apply_gaussian_blur(self, sigma: float) -> None:
+        """Apply Gaussian blur to the image stack for processing."""
+        if self.data is None:
+            return
+        if not self.is_blurred:
+            self.data_before_blur = self.data.copy()
+        self.data = gaussian_blur_stack(self.data_before_blur, sigma)
+        self.is_blurred = True
+
+    def remove_gaussian_blur(self) -> None:
+        """Restore the image stack to the state before blurring."""
+        if not self.is_blurred:
+            return
+        if self.data_before_blur is not None:
+            self.data = self.data_before_blur
+        self.data_before_blur = None
+        self.is_blurred = False
+        self.show_original = False
+
+    def toggle_show_original(self) -> None:
+        """Toggle display between blurred and original image."""
+        if not self.is_blurred:
+            return
+        self.show_original = not self.show_original
 
     def remove_background(self, percentile: float, slice_idx: int | None = None) -> None:
         """Remove low intensity pixels from the mask on ``slice_idx``."""
