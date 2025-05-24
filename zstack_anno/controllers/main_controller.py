@@ -118,6 +118,17 @@ class MainController(QMainWindow):
         ctrl.addWidget(self.show_orig_btn)
         ctrl.addWidget(self.clear_blur_btn)
 
+        # Seed generation and vesselness growing
+        self.seed_thresh_edit = QLineEdit()
+        self.seed_thresh_edit.setPlaceholderText("Seed %")
+        self.seed_btn = QPushButton("Seed")
+        self.seed_btn.clicked.connect(self._seed_current)
+        self.grow_btn = QPushButton("Grow")
+        self.grow_btn.clicked.connect(self._grow_vesselness)
+        ctrl.addWidget(self.seed_thresh_edit)
+        ctrl.addWidget(self.seed_btn)
+        ctrl.addWidget(self.grow_btn)
+
         self.info_label = QLabel("")
         ctrl.addWidget(self.info_label)
         layout.addLayout(ctrl)
@@ -371,6 +382,32 @@ class MainController(QMainWindow):
     def _clear_blur(self) -> None:
         self.model.remove_gaussian_blur()
         self._update_view(reset_view=True)
+
+    def _seed_current(self) -> None:
+        if not self._ensure_masks():
+            return
+        try:
+            pct = float(self.seed_thresh_edit.text())
+        except ValueError:
+            pct = 90.0
+        self._push_undo("seed")
+        img = self.model.get_current()
+        cur = self.model.get_mask()
+        seeds = morphology_tools.sample_seeds(img, pct, num_seeds=20000)
+        cur = cur.copy()
+        cur[seeds > 0] = 1
+        self.model.set_mask(cur)
+        self._update_view()
+
+    def _grow_vesselness(self) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("grow")
+        img = self.model.get_current()
+        cur = self.model.get_mask()
+        grown = morphology_tools.vesselness_region_grow(img.astype(float), cur)
+        self.model.set_mask(grown)
+        self._update_view()
 
     def _undo(self) -> None:
         if not self.undo_stack:

@@ -169,3 +169,88 @@ def gaussian_blur_stack(stack: np.ndarray, sigma: float) -> np.ndarray:
     """Apply ``gaussian_blur_slice`` to each slice of a stack."""
     return np.stack([gaussian_blur_slice(s, sigma) for s in stack])
 
+
+def sample_seeds(
+    slice_: np.ndarray, percentile: float, num_seeds: int = 20000
+) -> np.ndarray:
+    """Randomly sample ``num_seeds`` pixels above a percentile threshold."""
+    thresh = np.percentile(slice_, percentile)
+    coords = np.argwhere(slice_ > thresh)
+    if coords.size == 0:
+        return np.zeros_like(slice_, dtype=np.uint8)
+    n = min(num_seeds, coords.shape[0])
+    idx = np.random.default_rng().choice(coords.shape[0], n, replace=False)
+    selected = coords[idx]
+    mask = np.zeros_like(slice_, dtype=np.uint8)
+    mask[selected[:, 0], selected[:, 1]] = 1
+    return mask
+
+
+def _second_derivative(arr: np.ndarray, axis: int) -> np.ndarray:
+    return np.gradient(np.gradient(arr, axis=axis), axis=axis)
+
+
+def _cross_derivative(arr: np.ndarray) -> np.ndarray:
+    return np.gradient(np.gradient(arr, axis=1), axis=0)
+
+
+def vesselness2d(slice_: np.ndarray, sigmas: list[float]) -> tuple[np.ndarray, np.ndarray]:
+    """Compute multi-scale vesselness and orientation maps."""
+    vesselness = np.zeros_like(slice_, dtype=float)
+    orientation = np.zeros_like(slice_, dtype=float)
+    for sigma in sigmas:
+        sm = gaussian_blur_slice(slice_.astype(float), sigma)
+        dxx = _second_derivative(sm, 1) * sigma**2
+        dyy = _second_derivative(sm, 0) * sigma**2
+        dxy = _cross_derivative(sm) * sigma**2
+        tmp = np.sqrt((dxx - dyy) ** 2 + 4 * dxy**2)
+        lam1 = 0.5 * (dxx + dyy + tmp)
+        lam2 = 0.5 * (dxx + dyy - tmp)
+        swap = np.abs(lam1) > np.abs(lam2)
+        lam1[swap], lam2[swap] = lam2[swap], lam1[swap]
+        beta = 0.5
+        c = 15.0
+        ra = np.abs(lam1) / (np.abs(lam2) + 1e-12)
+        rb = np.sqrt(lam1**2 + lam2**2)
+        v = (1 - np.exp(-(ra**2) / (2 * beta**2))) * np.exp(-(rb**2) / (2 * c**2))
+        v[lam2 > 0] = 0
+        ori = 0.5 * np.arctan2(2 * dxy, dxx - dyy)
+        update = v > vesselness
+        vesselness[update] = v[update]
+        orientation[update] = ori[update]
+    return vesselness, orientation
+
+
+def vesselness_region_grow(
+    slice_: np.ndarray,
+    seeds: np.ndarray,
+    sigmas: list[float] | None = None,
+    angle_thresh: float = np.pi / 6,
+    vesselness_thresh: float = 0.2,
+) -> np.ndarray:
+    """Grow ``seeds`` using vesselness and orientation consistency."""
+    if sigmas is None:
+        sigmas = [1, 2, 3]
+    vess, orient = vesselness2d(slice_, sigmas)
+    mask = seeds.astype(np.uint8).copy()
+    visited = mask.astype(bool)
+    h, w = mask.shape
+    q = [(y, x) for y, x in zip(*np.nonzero(mask))]
+    while q:
+        y, x = q.pop(0)
+        ref_ori = orient[y, x]
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dy == 0 and dx == 0:
+                    continue
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < h and 0 <= nx < w and not visited[ny, nx]:
+                    if vess[ny, nx] >= vesselness_thresh:
+                        diff = abs(ref_ori - orient[ny, nx])
+                        diff = min(diff, np.pi - diff)
+                        if diff <= angle_thresh:
+                            visited[ny, nx] = True
+                            mask[ny, nx] = 1
+                            q.append((ny, nx))
+    return mask
+

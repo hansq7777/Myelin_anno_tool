@@ -10,6 +10,8 @@ from zstack_anno.utils.morphology_tools import (
     remove_small,
     histogram_stretch_stack,
     remove_mask_background,
+    sample_seeds,
+    vesselness_region_grow,
 )
 
 
@@ -70,4 +72,20 @@ def test_remove_mask_background():
     filtered = remove_mask_background(img, mask, 50)
     expected = np.array([[0, 0], [1, 1]], dtype=np.uint8)
     assert np.array_equal(filtered, expected)
+
+
+def test_sample_seeds():
+    img = np.arange(100, dtype=np.uint8).reshape(10, 10)
+    seeds = sample_seeds(img, 90, num_seeds=5)
+    assert seeds.sum() == 5
+    assert np.all(img[seeds > 0] > np.percentile(img, 90))
+
+
+def test_vesselness_region_grow():
+    img = np.zeros((5, 5), dtype=float)
+    img[:, 2] = 1.0
+    seeds = np.zeros_like(img, dtype=np.uint8)
+    seeds[2, 2] = 1
+    result = vesselness_region_grow(img, seeds, sigmas=[1], vesselness_thresh=0.01)
+    assert result[:, 2].sum() == 5
 
