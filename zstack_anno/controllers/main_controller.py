@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QPushButton,
+    QCheckBox,
     QLineEdit,
     QLabel,
     QSpinBox,
@@ -97,11 +98,8 @@ class MainController(QMainWindow):
         self.stretch_edit.setPlaceholderText("Stretch %")
         self.stretch_button = QPushButton("Stretch")
         self.stretch_button.clicked.connect(self._apply_stretch)
-        self.reset_stretch_button = QPushButton("Reset")
-        self.reset_stretch_button.clicked.connect(self._reset_stretch)
         ctrl.addWidget(self.stretch_edit)
         ctrl.addWidget(self.stretch_button)
-        ctrl.addWidget(self.reset_stretch_button)
 
         # Gaussian blur controls
         self.blur_btn = QPushButton("Blur")
@@ -109,13 +107,13 @@ class MainController(QMainWindow):
         self.blur_spin = QSpinBox()
         self.blur_spin.setRange(1, 10)
         self.blur_spin.setValue(1)
-        self.show_orig_btn = QPushButton("Show Original")
-        self.show_orig_btn.clicked.connect(self._toggle_original)
+        self.show_orig_chk = QCheckBox("Show Original")
+        self.show_orig_chk.toggled.connect(self._toggle_original)
         self.clear_blur_btn = QPushButton("Clear Blur")
         self.clear_blur_btn.clicked.connect(self._clear_blur)
         ctrl.addWidget(self.blur_btn)
         ctrl.addWidget(self.blur_spin)
-        ctrl.addWidget(self.show_orig_btn)
+        ctrl.addWidget(self.show_orig_chk)
         ctrl.addWidget(self.clear_blur_btn)
 
         # Seed generation and vesselness growing
@@ -151,15 +149,37 @@ class MainController(QMainWindow):
         save_mask_act.triggered.connect(self._save_masks)
 
         edit_menu = self.menuBar().addMenu("Edit")
-        dilate_act = edit_menu.addAction("Dilate")
-        dilate_act.triggered.connect(self._dilate_current)
-        erode_act = edit_menu.addAction("Erode")
-        erode_act.triggered.connect(self._erode_current)
-        edit_menu.addSeparator()
         undo_act = edit_menu.addAction("Undo")
         undo_act.triggered.connect(self._undo)
         redo_act = edit_menu.addAction("Redo")
         redo_act.triggered.connect(self._redo)
+
+        mask_menu = self.menuBar().addMenu("Mask")
+        dilate_act = mask_menu.addAction("Dilate")
+        dilate_act.triggered.connect(self._dilate_current)
+        erode_act = mask_menu.addAction("Erode")
+        erode_act.triggered.connect(self._erode_current)
+        filter_act = mask_menu.addAction("Filter Small")
+        filter_act.triggered.connect(self._filter_small)
+        bg_act = mask_menu.addAction("Remove Background")
+        bg_act.triggered.connect(self._apply_bg_filter)
+        seed_act = mask_menu.addAction("Seed")
+        seed_act.triggered.connect(self._seed_current)
+        grow_act = mask_menu.addAction("Grow")
+        grow_act.triggered.connect(self._grow_vesselness)
+
+        image_menu = self.menuBar().addMenu("Image")
+        stretch_act = image_menu.addAction("Histogram Stretch")
+        stretch_act.triggered.connect(self._apply_stretch)
+        blur_act = image_menu.addAction("Gaussian Blur")
+        blur_act.triggered.connect(self._apply_blur)
+        self.show_orig_act = image_menu.addAction("Show Original")
+        self.show_orig_act.setCheckable(True)
+        self.show_orig_act.toggled.connect(self.show_orig_chk.setChecked)
+        self.show_orig_chk.toggled.connect(self.show_orig_act.setChecked)
+        self.show_orig_act.setChecked(self.show_orig_chk.isChecked())
+        clear_blur_act = image_menu.addAction("Clear Blur")
+        clear_blur_act.triggered.connect(self._clear_blur)
 
     def _open_file(self):
         if not self._prompt_save_if_dirty():
@@ -359,13 +379,10 @@ class MainController(QMainWindow):
             pct = float(self.stretch_edit.text())
         except ValueError:
             pct = 0.0
-        self.model.histogram_stretch(pct)
-        self._update_view(reset_view=True)
-
-    def _reset_stretch(self) -> None:
-        if self.model.data is None:
-            return
-        self.model.reset_contrast()
+        if pct <= 0:
+            self.model.reset_contrast()
+        else:
+            self.model.histogram_stretch(pct)
         self._update_view(reset_view=True)
 
     def _apply_blur(self) -> None:
