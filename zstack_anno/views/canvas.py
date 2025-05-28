@@ -16,6 +16,7 @@ class SliceCanvas(QGraphicsView):
         self._image_item = None
         self._mask_item = None
         self._zoom = 1.0
+        self._mask_opacity = 0.5  # default 50%
 
     def set_image(self, arr: np.ndarray, reset_view: bool = False) -> None:
         """显示灰度图像。"""
@@ -50,6 +51,21 @@ class SliceCanvas(QGraphicsView):
         self._zoom *= factor
         self.scale(factor, factor)
 
+    def set_mask_opacity(self, opacity: float) -> None:
+        """Set mask opacity as a fraction from 0 to 1."""
+        opacity = max(0.0, min(1.0, opacity))
+        self._mask_opacity = opacity
+        if self._mask_item is not None:
+            # Reapply current mask to update opacity
+            img = self._mask_item.pixmap().toImage()
+            if img is not None:
+                w = img.width()
+                h = img.height()
+                arr = np.frombuffer(img.bits(), dtype=np.uint8).reshape(h, w, 4)
+                arr[..., 3] = (arr[..., 3] > 0).astype(np.uint8) * int(255 * opacity)
+                new_img = QImage(arr.data, w, h, QImage.Format_RGBA8888)
+                self._mask_item.setPixmap(QPixmap.fromImage(new_img))
+
     def set_mask(self, mask: np.ndarray | None) -> None:
         """设置掩膜叠加，None 表示移除。"""
         if mask is None:
@@ -64,7 +80,8 @@ class SliceCanvas(QGraphicsView):
         h, w = mask.shape
         rgba = np.zeros((h, w, 4), dtype=np.uint8)
         rgba[..., 0] = 255  # 红色
-        rgba[..., 3] = (mask > 0).astype(np.uint8) * 120
+        alpha = int(255 * self._mask_opacity)
+        rgba[..., 3] = (mask > 0).astype(np.uint8) * alpha
         img = QImage(rgba.data, w, h, QImage.Format_RGBA8888)
         pix = QPixmap.fromImage(img)
 

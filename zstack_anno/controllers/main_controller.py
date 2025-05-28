@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QLabel,
     QSpinBox,
+    QComboBox,
     QMessageBox,
 )
 from PyQt5.QtCore import Qt, QEvent, QPoint
@@ -110,11 +111,17 @@ class MainController(QMainWindow):
         self.blur_spin.setValue(1)
         self.show_orig_chk = QCheckBox("Show Original")
         self.show_orig_chk.toggled.connect(self._toggle_original)
+        self.opacity_combo = QComboBox()
+        for pct in (0, 25, 50, 75, 100):
+            self.opacity_combo.addItem(f"{pct}%", pct)
+        self.opacity_combo.setCurrentIndex(2)  # default 50%
+        self.opacity_combo.currentIndexChanged.connect(self._change_opacity)
         self.clear_blur_btn = QPushButton("Clear Blur")
         self.clear_blur_btn.clicked.connect(self._clear_blur)
         ctrl.addWidget(self.blur_btn)
         ctrl.addWidget(self.blur_spin)
         ctrl.addWidget(self.show_orig_chk)
+        ctrl.addWidget(self.opacity_combo)
         ctrl.addWidget(self.clear_blur_btn)
 
         # Seed generation and vesselness growing
@@ -396,6 +403,15 @@ class MainController(QMainWindow):
     def _toggle_original(self) -> None:
         self.model.toggle_show_original()
         self._update_view(reset_view=True)
+
+    def _change_opacity(self) -> None:
+        value = self.opacity_combo.currentData()
+        if value is None:
+            return
+        self.canvas.set_mask_opacity(value / 100.0)
+        # refresh current mask to apply new opacity
+        mask = self.model.get_mask() if self.model.masks is not None else None
+        self.canvas.set_mask(mask)
 
     def _clear_blur(self) -> None:
         self.model.remove_gaussian_blur()
