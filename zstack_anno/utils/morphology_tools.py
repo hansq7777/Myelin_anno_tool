@@ -1,6 +1,21 @@
 import numpy as np
 
 try:
+    from skimage.morphology import binary_dilation, binary_erosion, remove_small_objects
+    from skimage.measure import label
+except Exception:  # pragma: no cover - scikit-image may be unavailable
+    binary_dilation = None  # type: ignore
+    binary_erosion = None  # type: ignore
+    remove_small_objects = None  # type: ignore
+    label = None  # type: ignore
+    gaussian = None  # type: ignore
+else:
+    try:
+        from skimage.filters import gaussian
+    except Exception:  # pragma: no cover - scikit-image may be unavailable
+        gaussian = None  # type: ignore
+
+try:
     from scipy.ndimage import gaussian_filter  # type: ignore
 except Exception:  # pragma: no cover - scipy may be unavailable
     gaussian_filter = None
@@ -29,6 +44,9 @@ def _erode_once(arr: np.ndarray) -> np.ndarray:
 
 
 def dilate(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
+    if binary_dilation is not None:
+        result = binary_dilation(mask > 0, footprint=np.ones((3, 3)), iterations=iterations)
+        return result.astype(mask.dtype)
     result = mask.copy()
     for _ in range(iterations):
         result = _dilate_once(result)
@@ -36,6 +54,9 @@ def dilate(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
 
 
 def erode(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
+    if binary_erosion is not None:
+        result = binary_erosion(mask > 0, footprint=np.ones((3, 3)), iterations=iterations)
+        return result.astype(mask.dtype)
     result = mask.copy()
     for _ in range(iterations):
         result = _erode_once(result)
@@ -44,6 +65,8 @@ def erode(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
 
 def label_components(mask: np.ndarray) -> np.ndarray:
     """Label connected components in a binary mask."""
+    if label is not None:
+        return label(mask > 0, connectivity=1)
     h, w = mask.shape
     labels = np.zeros((h, w), dtype=np.int32)
     current = 0
@@ -79,6 +102,9 @@ def erode_stack(stack: np.ndarray, iterations: int = 1) -> np.ndarray:
 
 def remove_small(mask: np.ndarray, min_size: int) -> np.ndarray:
     """Remove connected components smaller than ``min_size``."""
+    if remove_small_objects is not None:
+        result = remove_small_objects(mask > 0, min_size=min_size)
+        return result.astype(mask.dtype)
     labels = label_components(mask)
     if labels.max() == 0:
         return mask.copy()
@@ -162,6 +188,8 @@ def gaussian_blur_slice(slice_: np.ndarray, sigma: float) -> np.ndarray:
     """Blur a single slice with Gaussian kernel."""
     if gaussian_filter is not None:  # pragma: no cover - optional dependency
         return gaussian_filter(slice_, sigma=sigma)
+    if gaussian is not None:
+        return gaussian(slice_, sigma=sigma, preserve_range=True)
     return _gaussian_blur_slice_numpy(slice_, sigma)
 
 
