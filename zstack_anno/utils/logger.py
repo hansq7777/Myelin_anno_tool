@@ -1,1 +1,3 @@
-# 以后会写完整日志，此处先留空
+"""Logging utilities (currently unused)."""
+
+# Placeholder module for future logging setup
