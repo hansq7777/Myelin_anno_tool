@@ -157,6 +157,26 @@ class ZStackModel:
             self.update_components()
         return int(sum(self.components[i].max() for i in range(self.components.shape[0])))
 
+    # --------- slice helpers ---------
+    def _extract_slice(self, idx: int) -> np.ndarray:
+        """Return slice ``idx`` from ``data``."""
+        if self.data is None:
+            raise RuntimeError("Image not loaded")
+        if not (0 <= idx < self.n_slices):
+            raise ValueError("slice index out of range")
+        return self.data[idx]
+
+    @staticmethod
+    def _normalize_to_8bit(arr: np.ndarray) -> np.ndarray:
+        """Normalize array to uint8 range."""
+        arr = arr.astype(float)
+        mn = arr.min()
+        mx = arr.max()
+        if mx > mn:
+            arr = (arr - mn) / (mx - mn)
+        arr = np.clip(arr * 255, 0, 255)
+        return arr.astype(np.uint8)
+
     # --------- image utilities ---------
     def histogram_stretch(self, percentile: float) -> None:
         """Apply histogram stretch to the entire stack."""
