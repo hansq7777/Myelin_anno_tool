@@ -1,4 +1,5 @@
 from PyQt5.QtWidgets import (
+    QApplication,
     QMainWindow,
     QFileDialog,
     QSlider,
@@ -544,5 +545,52 @@ class MainController(QMainWindow):
         y0 = int(min(scene_start.y(), scene_end.y()))
         y1 = int(max(scene_start.y(), scene_end.y())) + 1
         self.model.delete_components_touching_rect(self.model.index, x0, y0, x1, y1)
+        self._update_view()
+
+    # --------- additional utilities ---------
+    def _on_close_window(self) -> None:
+        """Close the window and quit the application."""
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
+    def choose_annotation_folder(self) -> str | None:
+        """Prompt for a folder to load or save annotations."""
+        path = QFileDialog.getExistingDirectory(self, "Select Annotation Folder")
+        return path or None
+
+    def close_current(self) -> None:
+        """Close the currently loaded data and reset the view."""
+        self.model = ZStackModel()
+        self.slider.setEnabled(False)
+        self.canvas.set_image(np.zeros((1, 1), dtype=np.uint8), reset_view=True)
+        self.canvas.set_mask(None)
+        self.statusBar().showMessage("Ready")
+
+    def toggle_select_mode(self) -> None:
+        """Toggle the brush selection mode."""
+        self.brush_enabled = not self.brush_enabled
+
+    def _delete_single_area(self, pos) -> None:
+        """Delete the component under a clicked position."""
+        if self.model.masks is None:
+            return
+        scene_pos = self.canvas.mapToScene(pos)
+        x = int(scene_pos.x())
+        y = int(scene_pos.y())
+        self.model.delete_components_touching_rect(self.model.index, x, y, x + 1, y + 1)
+        self._update_view()
+
+    def on_scroll(self, delta: int) -> None:
+        """Scroll through slices using mouse wheel delta."""
+        if delta > 0:
+            self._prev_slice()
+        else:
+            self._next_slice()
+
+    def update_masks(self) -> None:
+        """Recompute component labels and refresh the display."""
+        self.model.update_components()
         self._update_view()
 
