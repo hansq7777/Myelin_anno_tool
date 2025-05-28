@@ -8,6 +8,7 @@ from ..utils.morphology_tools import (
     gaussian_blur_stack,
 )
 
+
 class ZStackModel:
     """Model holding the currently loaded Z-stack image and masks."""
 
@@ -129,8 +130,6 @@ class ZStackModel:
         labeled = [label_components(slice_) for slice_ in self.masks]
         self.components = np.stack(labeled)
 
-
-
     # 便利属性
     @property
     def n_slices(self) -> int:
@@ -155,7 +154,9 @@ class ZStackModel:
             return 0
         if self.components is None:
             self.update_components()
-        return int(sum(self.components[i].max() for i in range(self.components.shape[0])))
+        return int(
+            sum(self.components[i].max() for i in range(self.components.shape[0]))
+        )
 
     # --------- slice helpers ---------
     def _extract_slice(self, idx: int) -> np.ndarray:
@@ -179,7 +180,12 @@ class ZStackModel:
 
     # --------- image utilities ---------
     def histogram_stretch(self, percentile: float) -> None:
-        """Apply histogram stretch to the entire stack."""
+        """Apply histogram stretch to the entire stack.
+
+        The adjustment is always computed from ``original_data`` so calling this
+        method multiple times with different ``percentile`` values will reapply
+        the stretch from the unmodified image instead of compounding the effect.
+        """
         if self.original_data is None:
             raise RuntimeError("Image not loaded")
         self.data = histogram_stretch_stack(self.original_data, percentile)
@@ -190,7 +196,12 @@ class ZStackModel:
             self.data = self.original_data.copy()
 
     def apply_gaussian_blur(self, sigma: float) -> None:
-        """Apply Gaussian blur to the image stack for processing."""
+        """Apply Gaussian blur to the image stack for processing.
+
+        On the first call, the current ``data`` is cached and all subsequent
+        blurs operate on this cached copy.  This means that changing ``sigma``
+        re-blurs the original image instead of blurring an already blurred one.
+        """
         if self.data is None:
             return
         if not self.is_blurred:
@@ -214,7 +225,9 @@ class ZStackModel:
             return
         self.show_original = not self.show_original
 
-    def remove_background(self, percentile: float, slice_idx: int | None = None) -> None:
+    def remove_background(
+        self, percentile: float, slice_idx: int | None = None
+    ) -> None:
         """Remove low intensity pixels from the mask on ``slice_idx``."""
         if self.data is None or self.masks is None:
             return
