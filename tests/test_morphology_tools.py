@@ -12,6 +12,7 @@ from zstack_anno.utils.morphology_tools import (
     remove_mask_background,
     sample_seeds,
     vesselness_region_grow,
+    intensity_region_grow,
 )
 
 
@@ -88,4 +89,20 @@ def test_vesselness_region_grow():
     seeds[2, 2] = 1
     result = vesselness_region_grow(img, seeds, sigmas=[1], vesselness_thresh=0.01)
     assert result[:, 2].sum() == 5
+
+
+def test_intensity_region_grow():
+    img = np.array(
+        [[10, 10, 10, 10, 10],
+         [10, 50, 50, 50, 10],
+         [10, 50, 80, 50, 10],
+         [10, 50, 50, 50, 10],
+         [10, 10, 10, 10, 10]],
+        dtype=float,
+    )
+    mask = np.zeros_like(img, dtype=np.uint8)
+    mask[2, 2] = 1
+    grown = intensity_region_grow(img, mask, diff_percent=50, hist_percent=20)
+    assert grown.sum() > 1
+    assert grown[0, 0] == 0
 
