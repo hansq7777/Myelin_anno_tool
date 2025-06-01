@@ -57,6 +57,8 @@ class MainController(QMainWindow):
         layout.addWidget(self.canvas)
         # -------- Controls --------
         ctrl = QHBoxLayout()
+
+        nav_layout = QVBoxLayout()
         self.prev_btn = QPushButton("Prev")
         self.prev_btn.clicked.connect(self._prev_slice)
         self.next_btn = QPushButton("Next")
@@ -64,10 +66,12 @@ class MainController(QMainWindow):
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setEnabled(False)
         self.slider.valueChanged.connect(self._on_slice_changed)
-        ctrl.addWidget(self.prev_btn)
-        ctrl.addWidget(self.slider)
-        ctrl.addWidget(self.next_btn)
+        nav_layout.addWidget(self.prev_btn)
+        nav_layout.addWidget(self.slider)
+        nav_layout.addWidget(self.next_btn)
+        ctrl.addLayout(nav_layout)
 
+        morph_layout = QVBoxLayout()
         self.dilate_btn = QPushButton("Dilate")
         self.dilate_btn.clicked.connect(self._dilate_current)
         self.erode_btn = QPushButton("Erode")
@@ -75,35 +79,40 @@ class MainController(QMainWindow):
         self.strength_spin = QSpinBox()
         self.strength_spin.setRange(1, 10)
         self.strength_spin.setValue(1)
-        ctrl.addWidget(self.dilate_btn)
-        ctrl.addWidget(self.erode_btn)
-        ctrl.addWidget(self.strength_spin)
+        morph_layout.addWidget(self.dilate_btn)
+        morph_layout.addWidget(self.erode_btn)
+        morph_layout.addWidget(self.strength_spin)
+        ctrl.addLayout(morph_layout)
 
+        filter_layout = QVBoxLayout()
         self.filter_btn = QPushButton("Filter <")
         self.filter_btn.clicked.connect(self._filter_small)
         self.filter_spin = QSpinBox()
         self.filter_spin.setRange(1, 10000)
         self.filter_spin.setValue(100)
-        ctrl.addWidget(self.filter_btn)
-        ctrl.addWidget(self.filter_spin)
+        filter_layout.addWidget(self.filter_btn)
+        filter_layout.addWidget(self.filter_spin)
+        ctrl.addLayout(filter_layout)
 
-        # Background filtering
+        bg_layout = QVBoxLayout()
         self.bg_percentile_edit = QLineEdit()
         self.bg_percentile_edit.setPlaceholderText("BG %")
         self.bg_filter_button = QPushButton("BG Filter")
         self.bg_filter_button.clicked.connect(self._apply_bg_filter)
-        ctrl.addWidget(self.bg_percentile_edit)
-        ctrl.addWidget(self.bg_filter_button)
+        bg_layout.addWidget(self.bg_percentile_edit)
+        bg_layout.addWidget(self.bg_filter_button)
+        ctrl.addLayout(bg_layout)
 
-        # Histogram stretch
+        stretch_layout = QVBoxLayout()
         self.stretch_edit = QLineEdit()
         self.stretch_edit.setPlaceholderText("Stretch %")
         self.stretch_button = QPushButton("Stretch")
         self.stretch_button.clicked.connect(self._apply_stretch)
-        ctrl.addWidget(self.stretch_edit)
-        ctrl.addWidget(self.stretch_button)
+        stretch_layout.addWidget(self.stretch_edit)
+        stretch_layout.addWidget(self.stretch_button)
+        ctrl.addLayout(stretch_layout)
 
-        # Gaussian blur controls
+        blur_layout = QVBoxLayout()
         self.blur_btn = QPushButton("Blur")
         self.blur_btn.clicked.connect(self._apply_blur)
         self.blur_spin = QSpinBox()
@@ -114,26 +123,37 @@ class MainController(QMainWindow):
         self.opacity_combo = QComboBox()
         for pct in (0, 25, 50, 75, 100):
             self.opacity_combo.addItem(f"{pct}%", pct)
-        self.opacity_combo.setCurrentIndex(2)  # default 50%
+        self.opacity_combo.setCurrentIndex(2)
         self.opacity_combo.currentIndexChanged.connect(self._change_opacity)
         self.clear_blur_btn = QPushButton("Clear Blur")
         self.clear_blur_btn.clicked.connect(self._clear_blur)
-        ctrl.addWidget(self.blur_btn)
-        ctrl.addWidget(self.blur_spin)
-        ctrl.addWidget(self.show_orig_chk)
-        ctrl.addWidget(self.opacity_combo)
-        ctrl.addWidget(self.clear_blur_btn)
+        blur_layout.addWidget(self.blur_btn)
+        blur_layout.addWidget(self.blur_spin)
+        blur_layout.addWidget(self.show_orig_chk)
+        blur_layout.addWidget(self.opacity_combo)
+        blur_layout.addWidget(self.clear_blur_btn)
+        ctrl.addLayout(blur_layout)
 
-        # Seed generation and vesselness growing
+        grow_layout = QVBoxLayout()
         self.seed_thresh_edit = QLineEdit()
         self.seed_thresh_edit.setPlaceholderText("Seed %")
         self.seed_btn = QPushButton("Seed")
         self.seed_btn.clicked.connect(self._seed_current)
-        self.grow_btn = QPushButton("Grow")
+        self.grow_btn = QPushButton("Vessel Grow")
         self.grow_btn.clicked.connect(self._grow_vesselness)
-        ctrl.addWidget(self.seed_thresh_edit)
-        ctrl.addWidget(self.seed_btn)
-        ctrl.addWidget(self.grow_btn)
+        self.int_diff_edit = QLineEdit()
+        self.int_diff_edit.setPlaceholderText("Diff %")
+        self.int_hist_edit = QLineEdit()
+        self.int_hist_edit.setPlaceholderText("Hist %")
+        self.int_grow_btn = QPushButton("Int Grow")
+        self.int_grow_btn.clicked.connect(self._grow_intensity)
+        grow_layout.addWidget(self.seed_thresh_edit)
+        grow_layout.addWidget(self.seed_btn)
+        grow_layout.addWidget(self.grow_btn)
+        grow_layout.addWidget(self.int_diff_edit)
+        grow_layout.addWidget(self.int_hist_edit)
+        grow_layout.addWidget(self.int_grow_btn)
+        ctrl.addLayout(grow_layout)
 
         self.info_label = QLabel("")
         ctrl.addWidget(self.info_label)
@@ -173,8 +193,10 @@ class MainController(QMainWindow):
         bg_act.triggered.connect(self._apply_bg_filter)
         seed_act = mask_menu.addAction("Seed")
         seed_act.triggered.connect(self._seed_current)
-        grow_act = mask_menu.addAction("Grow")
+        grow_act = mask_menu.addAction("Vessel Grow")
         grow_act.triggered.connect(self._grow_vesselness)
+        int_grow_act = mask_menu.addAction("Intensity Grow")
+        int_grow_act.triggered.connect(self._grow_intensity)
 
         image_menu = self.menuBar().addMenu("Image")
         stretch_act = image_menu.addAction("Histogram Stretch")
@@ -440,6 +462,26 @@ class MainController(QMainWindow):
         img = self.model.get_current()
         cur = self.model.get_mask()
         grown = morphology_tools.vesselness_region_grow(img.astype(float), cur)
+        self.model.set_mask(grown)
+        self._update_view()
+
+    def _grow_intensity(self) -> None:
+        if not self._ensure_masks():
+            return
+        try:
+            diff_pct = float(self.int_diff_edit.text())
+        except ValueError:
+            diff_pct = 20.0
+        try:
+            hist_pct = float(self.int_hist_edit.text())
+        except ValueError:
+            hist_pct = None
+        self._push_undo("int_grow")
+        img = self.model.get_current()
+        cur = self.model.get_mask()
+        grown = morphology_tools.intensity_region_grow(
+            img.astype(float), cur, diff_pct, hist_pct
+        )
         self.model.set_mask(grown)
         self._update_view()
 
