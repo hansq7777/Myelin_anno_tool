@@ -217,6 +217,10 @@ class MainController(QMainWindow):
         clear_blur_act = image_menu.addAction("Clear Blur")
         clear_blur_act.triggered.connect(self._clear_blur)
 
+        help_menu = self.menuBar().addMenu("Help")
+        help_act = help_menu.addAction("Shortcuts && Features")
+        help_act.triggered.connect(self._show_help)
+
     def _open_file(self):
         if not self._prompt_save_if_dirty():
             return
@@ -661,4 +665,25 @@ class MainController(QMainWindow):
         """Recompute component labels and refresh the display."""
         self.model.update_components()
         self._update_view()
+
+    def _show_help(self) -> None:
+        """Display a popup with available shortcuts and features."""
+        text = (
+            "Keyboard Shortcuts:\n"
+            "  Arrow keys - previous/next slice\n"
+            "  D/E - dilate/erode current mask\n"
+            "  Z/X - undo/redo\n"
+            "  P - toggle brush painting\n"
+            "  [ and ] - change brush size\n"
+            "  H - hand tool (panning)\n"
+            "  Right click drag - delete masks touching drag rectangle\n\n"
+            "Features:\n"
+            "  File menu - open image stack, create/open/save mask stacks\n"
+            "  Edit menu - undo, redo\n"
+            "  Mask menu - dilate, erode, filter small components,\n"
+            "    filter linear components, remove background, seed, intensity grow\n"
+            "  Image menu - histogram stretch, gaussian blur (show original toggle, clear blur)\n"
+            "  Zoom with mouse wheel when over the image"
+        )
+        QMessageBox.information(self, "Help", text)
 
