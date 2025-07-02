@@ -20,6 +20,7 @@ import numpy as np
 from ..models.zstack_model import ZStackModel
 from ..views.canvas import SliceCanvas
 from ..utils import morphology_tools
+from ..utils.dialogs import question_with_shortcuts
 
 class MainController(QMainWindow):
     def __init__(self):
@@ -267,12 +268,10 @@ class MainController(QMainWindow):
     def _prompt_save_if_dirty(self) -> bool:
         if not self.model.mask_dirty:
             return True
-        ret = QMessageBox.question(
+        ret = question_with_shortcuts(
             self,
             "Save Masks",
             "Save mask changes?",
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-            QMessageBox.Yes,
         )
         if ret == QMessageBox.Cancel:
             return False
