@@ -265,10 +265,10 @@ def intensity_region_grow(
     labels = label_components(mask)
     unique = np.unique(labels)
     unique = unique[unique != 0]
-    hist_mask = None
+    h, w = mask.shape
+    thresh = None
     if hist_percent is not None:
         thresh = float(np.percentile(slice_, hist_percent))
-        hist_mask = slice_ >= thresh
 
     for lv in unique:
         region = labels == lv
@@ -276,24 +276,29 @@ def intensity_region_grow(
             continue
         mean_intensity = float(slice_[region].astype(float).mean())
         diff_thresh = mean_intensity * (diff_percent / 100.0)
-        diff_mask = np.abs(slice_ - mean_intensity) <= diff_thresh
+        q = [tuple(pt) for pt in zip(*np.nonzero(region))]
+        visited = set(q)
+        while q:
+            y, x = q.pop()
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    if dy == 0 and dx == 0:
+                        continue
+                    ny, nx = y + dy, x + dx
+                    if not (0 <= ny < h and 0 <= nx < w):
+                        continue
+                    if labels[ny, nx] != 0 or (ny, nx) in visited:
+                        continue
+                    val = float(slice_[ny, nx])
+                    if thresh is not None and val < thresh:
+                        continue
+                    if abs(val - mean_intensity) <= diff_thresh:
+                        labels[ny, nx] = lv
+                        visited.add((ny, nx))
+                        q.append((ny, nx))
 
-        labels_bool = region.copy()
-        new_region = region.copy()
-        while True:
-            dilated = dilate(new_region.astype(np.uint8)) > 0
-            candidates = dilated & ~labels_bool
-            if hist_mask is not None:
-                candidates &= hist_mask
-            candidates &= diff_mask
-            if not candidates.any():
-                break
-            labels_bool |= candidates
-            new_region = candidates
-
-        labels[labels_bool] = lv
-
-    return (labels > 0).astype(np.uint8)
+    final = label_components(labels > 0)
+    return (final > 0).astype(np.uint8)
 
 
 def _skeletonize_numpy(slice_: np.ndarray) -> np.ndarray:
