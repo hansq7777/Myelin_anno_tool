@@ -1,11 +1,13 @@
 import numpy as np
 
 try:
-    from skimage.morphology import binary_dilation, binary_erosion, remove_small_objects
+    from skimage.morphology import binary_dilation as sk_binary_dilation
+    from skimage.morphology import binary_erosion as sk_binary_erosion
+    from skimage.morphology import remove_small_objects
     from skimage.measure import label
 except Exception:  # pragma: no cover - scikit-image may be unavailable
-    binary_dilation = None  # type: ignore
-    binary_erosion = None  # type: ignore
+    sk_binary_dilation = None  # type: ignore
+    sk_binary_erosion = None  # type: ignore
     remove_small_objects = None  # type: ignore
     label = None  # type: ignore
     gaussian = None  # type: ignore
@@ -14,6 +16,13 @@ else:
         from skimage.filters import gaussian
     except Exception:  # pragma: no cover - scikit-image may be unavailable
         gaussian = None  # type: ignore
+
+try:
+    from scipy.ndimage import binary_dilation as nd_binary_dilation
+    from scipy.ndimage import binary_erosion as nd_binary_erosion
+except Exception:  # pragma: no cover - scipy may be unavailable
+    nd_binary_dilation = None  # type: ignore
+    nd_binary_erosion = None  # type: ignore
 
 try:
     from scipy.ndimage import gaussian_filter  # type: ignore
@@ -44,8 +53,15 @@ def _erode_once(arr: np.ndarray) -> np.ndarray:
 
 
 def dilate(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
-    if binary_dilation is not None:
-        result = binary_dilation(mask > 0, footprint=np.ones((3, 3)), iterations=iterations)
+    """Dilate ``mask`` by a 3x3 structuring element."""
+    mask_bool = mask > 0
+    if nd_binary_dilation is not None:
+        result = nd_binary_dilation(mask_bool, structure=np.ones((3, 3)), iterations=iterations)
+        return result.astype(mask.dtype)
+    if sk_binary_dilation is not None:
+        result = mask_bool
+        for _ in range(iterations):
+            result = sk_binary_dilation(result, footprint=np.ones((3, 3)))
         return result.astype(mask.dtype)
     result = mask.copy()
     for _ in range(iterations):
@@ -54,8 +70,15 @@ def dilate(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
 
 
 def erode(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
-    if binary_erosion is not None:
-        result = binary_erosion(mask > 0, footprint=np.ones((3, 3)), iterations=iterations)
+    """Erode ``mask`` by a 3x3 structuring element."""
+    mask_bool = mask > 0
+    if nd_binary_erosion is not None:
+        result = nd_binary_erosion(mask_bool, structure=np.ones((3, 3)), iterations=iterations)
+        return result.astype(mask.dtype)
+    if sk_binary_erosion is not None:
+        result = mask_bool
+        for _ in range(iterations):
+            result = sk_binary_erosion(result, footprint=np.ones((3, 3)))
         return result.astype(mask.dtype)
     result = mask.copy()
     for _ in range(iterations):
