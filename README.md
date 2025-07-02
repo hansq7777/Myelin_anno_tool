@@ -3,7 +3,7 @@ unsupervised annotation tool for deep learning data collection
 
 ## Running the GUI
 
-Install the dependencies (e.g. `PyQt5`, `tifffile`, and `numpy`) and
+Install the dependencies (e.g. `PyQt5`, `tifffile`, `numpy`, and `scipy`) and
 run the application with:
 
 ```bash
