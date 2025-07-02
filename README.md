@@ -3,7 +3,8 @@ unsupervised annotation tool for deep learning data collection
 
 ## Running the GUI
 
-Install the dependencies (e.g. `PyQt5`, `tifffile`, `numpy`, and `scipy`) and
+Install the dependencies (e.g. `PyQt5`, `tifffile`, `numpy`, `scipy`, and
+`scikit-image`) and
 run the application with:
 
 ```bash
@@ -11,6 +12,10 @@ python -m zstack_anno
 ```
 
 This will launch the annotation window defined in `zstack_anno`.
+
+Installing both `scipy` and `scikit-image` enables faster morphology
+operations. If either package is missing, slower NumPy fallbacks will be used
+and a warning will be issued at runtime.
 
 ### Menu overview
 

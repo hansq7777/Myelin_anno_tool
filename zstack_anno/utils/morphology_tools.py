@@ -1,4 +1,5 @@
 import numpy as np
+import warnings
 
 try:
     from skimage.morphology import binary_dilation as sk_binary_dilation
@@ -30,6 +31,14 @@ try:
     from scipy.ndimage import gaussian_filter  # type: ignore
 except Exception:  # pragma: no cover - scipy may be unavailable
     gaussian_filter = None
+
+
+if nd_binary_dilation is None or sk_binary_dilation is None:
+    warnings.warn(
+        "scipy and/or scikit-image not available; using slower NumPy "
+        "fallbacks for morphology operations",
+        RuntimeWarning,
+    )
 
 
 def _dilate_once(arr: np.ndarray) -> np.ndarray:
