@@ -94,6 +94,15 @@ class MainController(QMainWindow):
         filter_layout.addWidget(self.filter_spin)
         ctrl.addLayout(filter_layout)
 
+        linear_layout = QVBoxLayout()
+        self.linear_thresh_edit = QLineEdit()
+        self.linear_thresh_edit.setPlaceholderText("Lin Th")
+        self.linear_btn = QPushButton("Lin Filter")
+        self.linear_btn.clicked.connect(self._filter_linear)
+        linear_layout.addWidget(self.linear_thresh_edit)
+        linear_layout.addWidget(self.linear_btn)
+        ctrl.addLayout(linear_layout)
+
         bg_layout = QVBoxLayout()
         self.bg_percentile_edit = QLineEdit()
         self.bg_percentile_edit.setPlaceholderText("BG %")
@@ -186,6 +195,8 @@ class MainController(QMainWindow):
         erode_act.triggered.connect(self._erode_current)
         filter_act = mask_menu.addAction("Filter Small")
         filter_act.triggered.connect(self._filter_small)
+        linear_act = mask_menu.addAction("Filter Linear")
+        linear_act.triggered.connect(self._filter_linear)
         bg_act = mask_menu.addAction("Remove Background")
         bg_act.triggered.connect(self._apply_bg_filter)
         seed_act = mask_menu.addAction("Seed")
@@ -383,6 +394,19 @@ class MainController(QMainWindow):
         cur = self.model.get_mask()
         thresh = self.filter_spin.value() if hasattr(self, "filter_spin") else 100
         new = morphology_tools.remove_small(cur, thresh)
+        self.model.set_mask(new)
+        self._update_view()
+
+    def _filter_linear(self) -> None:
+        if not self._ensure_masks():
+            return
+        try:
+            thresh = float(self.linear_thresh_edit.text())
+        except ValueError:
+            thresh = 2.0
+        self._push_undo("filter_linear")
+        cur = self.model.get_mask()
+        new = morphology_tools.filter_linear_components(cur, thresh)
         self.model.set_mask(new)
         self._update_view()
 
