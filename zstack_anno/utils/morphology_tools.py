@@ -293,8 +293,7 @@ def intensity_region_grow(
 
         labels[labels_bool] = lv
 
-    final = label_components(labels > 0)
-    return (final > 0).astype(np.uint8)
+    return (labels > 0).astype(np.uint8)
 
 
 def _skeletonize_numpy(slice_: np.ndarray) -> np.ndarray:
