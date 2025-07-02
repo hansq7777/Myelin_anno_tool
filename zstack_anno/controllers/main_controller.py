@@ -139,8 +139,6 @@ class MainController(QMainWindow):
         self.seed_thresh_edit.setPlaceholderText("Seed %")
         self.seed_btn = QPushButton("Seed")
         self.seed_btn.clicked.connect(self._seed_current)
-        self.grow_btn = QPushButton("Vessel Grow")
-        self.grow_btn.clicked.connect(self._grow_vesselness)
         self.int_diff_edit = QLineEdit()
         self.int_diff_edit.setPlaceholderText("Diff %")
         self.int_hist_edit = QLineEdit()
@@ -149,7 +147,6 @@ class MainController(QMainWindow):
         self.int_grow_btn.clicked.connect(self._grow_intensity)
         grow_layout.addWidget(self.seed_thresh_edit)
         grow_layout.addWidget(self.seed_btn)
-        grow_layout.addWidget(self.grow_btn)
         grow_layout.addWidget(self.int_diff_edit)
         grow_layout.addWidget(self.int_hist_edit)
         grow_layout.addWidget(self.int_grow_btn)
@@ -193,8 +190,6 @@ class MainController(QMainWindow):
         bg_act.triggered.connect(self._apply_bg_filter)
         seed_act = mask_menu.addAction("Seed")
         seed_act.triggered.connect(self._seed_current)
-        grow_act = mask_menu.addAction("Vessel Grow")
-        grow_act.triggered.connect(self._grow_vesselness)
         int_grow_act = mask_menu.addAction("Intensity Grow")
         int_grow_act.triggered.connect(self._grow_intensity)
 
@@ -454,17 +449,6 @@ class MainController(QMainWindow):
         cur[seeds > 0] = 1
         self.model.set_mask(cur)
         self._update_view()
-
-    def _grow_vesselness(self) -> None:
-        if not self._ensure_masks():
-            return
-        self._push_undo("grow")
-        img = self.model.get_current()
-        cur = self.model.get_mask()
-        grown = morphology_tools.vesselness_region_grow(img.astype(float), cur)
-        self.model.set_mask(grown)
-        self._update_view()
-
     def _grow_intensity(self) -> None:
         if not self._ensure_masks():
             return
