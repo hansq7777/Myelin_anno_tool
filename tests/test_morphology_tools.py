@@ -108,6 +108,17 @@ def test_filter_linear_components():
     assert filtered[2:5, 2:5].sum() == 0
 
 
+def test_filter_linear_components_cross_lines():
+    mask = np.zeros((10, 10), dtype=np.uint8)
+    mask[1:9, 4] = 1
+    mask[5, 1:9] = 1
+    mask[7:9, 7:9] = 1
+    filtered = filter_linear_components(mask, linearity_thresh=2.0)
+    assert filtered[1:9, 4].sum() == 8
+    assert filtered[5, 1:9].sum() == 8
+    assert filtered[7:9, 7:9].sum() == 0
+
+
 def test_filter_linear_components_stack():
     stack = np.zeros((3, 6, 6), dtype=np.uint8)
     stack[0, 2, 3] = 1

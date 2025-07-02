@@ -4,11 +4,13 @@ try:
     from skimage.morphology import binary_dilation as sk_binary_dilation
     from skimage.morphology import binary_erosion as sk_binary_erosion
     from skimage.morphology import remove_small_objects
+    from skimage.morphology import skeletonize
     from skimage.measure import label
 except Exception:  # pragma: no cover - scikit-image may be unavailable
     sk_binary_dilation = None  # type: ignore
     sk_binary_erosion = None  # type: ignore
     remove_small_objects = None  # type: ignore
+    skeletonize = None  # type: ignore
     label = None  # type: ignore
     gaussian = None  # type: ignore
 else:
@@ -286,6 +288,47 @@ def intensity_region_grow(
     return (final > 0).astype(np.uint8)
 
 
+def _skeletonize_numpy(slice_: np.ndarray) -> np.ndarray:
+    """Fallback skeletonization using erosion/dilation."""
+    img = slice_.astype(np.uint8)
+    skeleton = np.zeros_like(img)
+    working = img.copy()
+    while np.any(working):
+        eroded = erode(working)
+        opened = dilate(eroded)
+        temp = working & (~opened)
+        skeleton |= temp
+        working = eroded
+    return skeleton
+
+
+def _neighbor_count(arr: np.ndarray) -> np.ndarray:
+    padded = np.pad(arr, 1, mode="constant", constant_values=0)
+    h, w = arr.shape
+    count = np.zeros_like(arr, dtype=int)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dy == 0 and dx == 0:
+                continue
+            count += padded[1 + dy : 1 + dy + h, 1 + dx : 1 + dx + w]
+    return count
+
+
+def _skeleton_segments(component: np.ndarray) -> np.ndarray:
+    """Label skeleton segments of a binary component."""
+    if skeletonize is not None:  # pragma: no cover - optional dependency
+        skel = skeletonize(component > 0)
+    else:
+        skel = _skeletonize_numpy(component > 0)
+    skel = skel.astype(np.uint8)
+    neigh = _neighbor_count(skel)
+    junctions = (skel > 0) & (neigh > 2)
+    segments = skel.copy()
+    segments[junctions] = 0
+    labels = label_components(segments)
+    return labels
+
+
 def filter_linear_components(mask: np.ndarray, linearity_thresh: float) -> np.ndarray:
     """Remove regions with low anisotropy from ``mask``.
 
@@ -299,21 +342,33 @@ def filter_linear_components(mask: np.ndarray, linearity_thresh: float) -> np.nd
     if labels.max() == 0:
         return mask.copy()
 
-    result = mask.copy()
+    result = np.zeros_like(mask, dtype=np.uint8)
     for lbl in range(1, labels.max() + 1):
-        coords = np.argwhere(labels == lbl)
-        if coords.shape[0] <= 2:
-            continue
-        coords = coords.astype(float)
-        coords -= coords.mean(axis=0)
-        cov = np.cov(coords, rowvar=False)
-        eigvals = np.linalg.eigvalsh(cov)
-        if eigvals.min() <= 0:
-            ratio = np.inf
-        else:
-            ratio = float(np.sqrt(eigvals.max() / eigvals.min()))
-        if ratio < linearity_thresh:
-            result[labels == lbl] = 0
+        component = labels == lbl
+        seg_labels = _skeleton_segments(component)
+        keep = np.zeros_like(component, dtype=np.uint8)
+        for seg_lbl in range(1, seg_labels.max() + 1):
+            coords = np.argwhere(seg_labels == seg_lbl).astype(float)
+            if coords.shape[0] <= 2:
+                continue
+            coords -= coords.mean(axis=0)
+            cov = np.cov(coords, rowvar=False)
+            eigvals = np.linalg.eigvalsh(cov)
+            if eigvals.min() <= 0:
+                ratio = np.inf
+            else:
+                ratio = float(np.sqrt(eigvals.max() / eigvals.min()))
+            if ratio >= linearity_thresh:
+                keep[seg_labels == seg_lbl] = 1
+        if keep.any():
+            grown = keep.copy()
+            while True:
+                dilated = dilate(grown)
+                dilated &= component
+                if np.array_equal(dilated, grown):
+                    break
+                grown = dilated
+            result[grown > 0] = 1
     return result
 
 
@@ -367,19 +422,56 @@ def filter_linear_components_stack(
     if labels.max() == 0:
         return stack.copy()
 
-    result = stack.copy()
+    result = np.zeros_like(stack, dtype=np.uint8)
     for lbl in range(1, labels.max() + 1):
-        coords = np.argwhere(labels == lbl).astype(float)
-        if coords.shape[0] <= 2:
-            continue
-        coords -= coords.mean(axis=0)
-        cov = np.cov(coords, rowvar=False)
-        eigvals = np.linalg.eigvalsh(cov)
-        if eigvals.min() <= 0:
-            ratio = np.inf
-        else:
-            ratio = float(np.sqrt(eigvals.max() / eigvals.min()))
-        if require_3d_linearity and ratio < linearity_thresh:
-            result[labels == lbl] = 0
+        component = labels == lbl
+        if require_3d_linearity:
+            coords = np.argwhere(component).astype(float)
+            if coords.shape[0] > 2:
+                coords -= coords.mean(axis=0)
+                cov = np.cov(coords, rowvar=False)
+                eigvals = np.linalg.eigvalsh(cov)
+                if eigvals.min() <= 0:
+                    ratio = np.inf
+                else:
+                    ratio = float(np.sqrt(eigvals.max() / eigvals.min()))
+                if ratio < linearity_thresh:
+                    continue
+
+        seg_labels = np.zeros_like(component, dtype=np.int32)
+        current = 0
+        for z in range(component.shape[0]):
+            sl = _skeleton_segments(component[z])
+            if sl.max() == 0:
+                continue
+            sl[sl > 0] += current
+            seg_labels[z] = sl
+            current = seg_labels.max()
+
+        keep = np.zeros_like(component, dtype=np.uint8)
+        for seg_lbl in range(1, seg_labels.max() + 1):
+            coords = np.argwhere(seg_labels == seg_lbl).astype(float)
+            if coords.shape[0] <= 2:
+                continue
+            coords -= coords.mean(axis=0)
+            cov = np.cov(coords, rowvar=False)
+            eigvals = np.linalg.eigvalsh(cov)
+            if eigvals.min() <= 0:
+                ratio = np.inf
+            else:
+                ratio = float(np.sqrt(eigvals.max() / eigvals.min()))
+            if ratio >= linearity_thresh:
+                keep[seg_labels == seg_lbl] = 1
+
+        if keep.any():
+            grown = keep.copy()
+            while True:
+                dilated = dilate_stack(grown)
+                dilated &= component
+                if np.array_equal(dilated, grown):
+                    break
+                grown = dilated
+            result[grown > 0] = 1
+
     return result
 
