@@ -678,11 +678,12 @@ class MainController(QMainWindow):
             "  H - hand tool (panning)\n"
             "  Right click drag - delete masks touching drag rectangle\n\n"
             "Features:\n"
-            "  File menu - open image stack, create/open/save mask stacks\n"
-            "  Edit menu - undo, redo\n"
-            "  Mask menu - dilate, erode, filter small components,\n"
-            "    filter linear components, remove background, seed, intensity grow\n"
-            "  Image menu - histogram stretch, gaussian blur (show original toggle, clear blur)\n"
+            "  File menu - open image stack; new, open or save mask stacks\n"
+            "  Edit menu - undo and redo\n"
+            "  Mask menu - dilate/erode (strength adjustable), size filter,\n"
+            "    linearity filter, remove background, seed masks, intensity grow\n"
+            "  Image menu - histogram stretch, gaussian blur (show original, clear blur)\n"
+            "  Mask opacity dropdown - set mask transparency\n"
             "  Zoom with mouse wheel when over the image"
         )
         QMessageBox.information(self, "Help", text)
