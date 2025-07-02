@@ -289,3 +289,101 @@ def intensity_region_grow(
     final = label_components(labels > 0)
     return (final > 0).astype(np.uint8)
 
+
+def filter_linear_components(mask: np.ndarray, linearity_thresh: float) -> np.ndarray:
+    """Remove regions with low anisotropy from ``mask``.
+
+    Each connected component is analysed using PCA on its pixel coordinates. The
+    ratio between the largest and smallest principal component variances is used
+    as a linearity measure.  Components with a ratio below ``linearity_thresh``
+    are removed.
+    """
+
+    labels = label_components(mask)
+    if labels.max() == 0:
+        return mask.copy()
+
+    result = mask.copy()
+    for lbl in range(1, labels.max() + 1):
+        coords = np.argwhere(labels == lbl)
+        if coords.shape[0] <= 2:
+            continue
+        coords = coords.astype(float)
+        coords -= coords.mean(axis=0)
+        cov = np.cov(coords, rowvar=False)
+        eigvals = np.linalg.eigvalsh(cov)
+        if eigvals.min() <= 0:
+            ratio = np.inf
+        else:
+            ratio = float(np.sqrt(eigvals.max() / eigvals.min()))
+        if ratio < linearity_thresh:
+            result[labels == lbl] = 0
+    return result
+
+
+def _label_components_3d(stack: np.ndarray) -> np.ndarray:
+    """Label 3D connected components with 26-neighbourhood."""
+
+    if label is not None:
+        return label(stack > 0, connectivity=1)
+
+    depth, h, w = stack.shape
+    labels = np.zeros((depth, h, w), dtype=np.int32)
+    current = 0
+    for z in range(depth):
+        for y in range(h):
+            for x in range(w):
+                if stack[z, y, x] and labels[z, y, x] == 0:
+                    current += 1
+                    q = [(z, y, x)]
+                    labels[z, y, x] = current
+                    while q:
+                        cz, cy, cx = q.pop()
+                        for dz in (-1, 0, 1):
+                            for dy in (-1, 0, 1):
+                                for dx in (-1, 0, 1):
+                                    nz, ny, nx = cz + dz, cy + dy, cx + dx
+                                    if (
+                                        0 <= nz < depth
+                                        and 0 <= ny < h
+                                        and 0 <= nx < w
+                                        and stack[nz, ny, nx]
+                                        and labels[nz, ny, nx] == 0
+                                    ):
+                                        labels[nz, ny, nx] = current
+                                        q.append((nz, ny, nx))
+    return labels
+
+
+def filter_linear_components_stack(
+    stack: np.ndarray,
+    linearity_thresh: float,
+    require_3d_linearity: bool = True,
+) -> np.ndarray:
+    """Apply ``filter_linear_components`` in 3D.
+
+    The stack is labelled as a volume so that neighbouring slices are merged
+    before computing anisotropy. If ``require_3d_linearity`` is ``True``,
+    components that are not sufficiently linear in 3D are removed.
+    """
+
+    labels = _label_components_3d(stack)
+    if labels.max() == 0:
+        return stack.copy()
+
+    result = stack.copy()
+    for lbl in range(1, labels.max() + 1):
+        coords = np.argwhere(labels == lbl).astype(float)
+        if coords.shape[0] <= 2:
+            continue
+        coords -= coords.mean(axis=0)
+        cov = np.cov(coords, rowvar=False)
+        eigvals = np.linalg.eigvalsh(cov)
+        if eigvals.min() <= 0:
+            ratio = np.inf
+        else:
+            ratio = float(np.sqrt(eigvals.max() / eigvals.min()))
+        if require_3d_linearity and ratio < linearity_thresh:
+            result[labels == lbl] = 0
+    return result
+
