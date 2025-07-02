@@ -415,7 +415,8 @@ class MainController(QMainWindow):
             return
         sigma = float(self.blur_spin.value()) if hasattr(self, "blur_spin") else 1.0
         self.model.apply_gaussian_blur(sigma)
-        self._update_view(reset_view=True)
+        # keep current zoom level when updating the view after blur
+        self._update_view()
 
     def _toggle_original(self) -> None:
         self.model.toggle_show_original()
@@ -432,7 +433,8 @@ class MainController(QMainWindow):
 
     def _clear_blur(self) -> None:
         self.model.remove_gaussian_blur()
-        self._update_view(reset_view=True)
+        # do not reset the view when clearing blur
+        self._update_view()
 
     def _seed_current(self) -> None:
         if not self._ensure_masks():
