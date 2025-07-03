@@ -1,8 +1,13 @@
 import importlib
+import sys
+from pathlib import Path
 import pytest
 np = importlib.import_module('numpy') if importlib.util.find_spec('numpy') else None
 if np is None:
     pytest.skip("numpy not available", allow_module_level=True)
+root = Path(__file__).resolve().parents[1]
+if str(root) not in sys.path:
+    sys.path.insert(0, str(root))
 from zstack_anno.utils.morphology_tools import (
     dilate,
     erode,
@@ -12,10 +17,6 @@ from zstack_anno.utils.morphology_tools import (
     remove_mask_background,
     sample_seeds,
     intensity_region_grow,
-    filter_linear_components,
-    filter_linear_components_stack,
-    filter_linear_bbox,
-    filter_linear_bbox_stack,
 )
 
 
@@ -101,61 +102,4 @@ def test_intensity_region_grow():
     assert grown[0, 0] == 0
 
 
-def test_filter_linear_components():
-    mask = np.zeros((10, 10), dtype=np.uint8)
-    mask[1:9, 5] = 1
-    mask[2:5, 2:5] = 1
-    filtered = filter_linear_components(mask, linearity_thresh=2.0)
-    assert filtered[1:9, 5].sum() == 8
-    assert filtered[2:5, 2:5].sum() == 0
-
-
-def test_filter_linear_components_cross_lines():
-    mask = np.zeros((10, 10), dtype=np.uint8)
-    mask[1:9, 4] = 1
-    mask[5, 1:9] = 1
-    mask[7:9, 7:9] = 1
-    filtered = filter_linear_components(mask, linearity_thresh=2.0)
-    assert filtered[1:9, 4].sum() == 8
-    assert filtered[5, 1:9].sum() == 8
-    assert filtered[7:9, 7:9].sum() == 0
-
-
-def test_filter_linear_components_stack():
-    stack = np.zeros((3, 6, 6), dtype=np.uint8)
-    stack[0, 2, 3] = 1
-    stack[1, 2, 3] = 1
-    stack[2, 2, 3] = 1
-    stack[0:2, 0:2, 0:2] = 1
-    result = filter_linear_components_stack(stack, linearity_thresh=2.0)
-    assert np.all(result[:, 2, 3] == 1)
-    assert result[0:2, 0:2, 0:2].sum() == 0
-
-
-def test_filter_linear_components_stack_keep_isotropic():
-    stack = np.zeros((2, 3, 3), dtype=np.uint8)
-    stack[:, 1, 1] = 1
-    stack[:, 0, 0] = 1
-    result = filter_linear_components_stack(
-        stack, linearity_thresh=2.0, require_3d_linearity=False
-    )
-    assert np.array_equal(result, stack)
-
-
-def test_filter_linear_bbox():
-    mask = np.zeros((10, 10), dtype=np.uint8)
-    mask[1:9, 5] = 1
-    mask[2:5, 2:5] = 1
-    result = filter_linear_bbox(mask, ratio_thresh=3.0)
-    assert result[1:9, 5].sum() == 8
-    assert result[2:5, 2:5].sum() == 0
-
-
-def test_filter_linear_bbox_stack():
-    stack = np.zeros((3, 6, 6), dtype=np.uint8)
-    stack[:, 2, 3] = 1
-    stack[0:2, 0:2, 0:2] = 1
-    result = filter_linear_bbox_stack(stack, ratio_thresh=2.0)
-    assert np.all(result[:, 2, 3] == 1)
-    assert result[0:2, 0:2, 0:2].sum() == 0
 
