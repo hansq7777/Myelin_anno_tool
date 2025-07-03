@@ -16,7 +16,8 @@ class StepListWidget(QListWidget):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        self.setDragDropMode(QListWidget.InternalMove)
+        # allow both internal move and external drops
+        self.setDragDropMode(QListWidget.DragDrop)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
@@ -38,6 +39,9 @@ class StepListWidget(QListWidget):
             item.setData(Qt.UserRole, data)
             item.setText(self.parent().format_step(data))
             self.addItem(item)
+            # prompt for parameters immediately when dropping
+            if data.get("params"):
+                self.parent().edit_step(item)
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
@@ -52,6 +56,10 @@ class ScriptEditor(QDialog):
         "Intensity Grow": {
             "method": "script_int_grow",
             "params": {"diff_pct": 20.0, "hist_pct": None},
+        },
+        "Background Filter": {
+            "method": "script_bg_filter",
+            "params": {"percentile": 0.0},
         },
         "Gaussian Blur": {"method": "script_blur", "params": {"sigma": 1.0}},
         "Clear Blur": {"method": "script_clear_blur", "params": {}},
@@ -75,9 +83,13 @@ class ScriptEditor(QDialog):
         layout.addWidget(self.action_list)
 
         btn_layout = QVBoxLayout()
+        self.add_btn = QPushButton("Add")
+        self.remove_btn = QPushButton("Remove")
         self.run_btn = QPushButton("Run")
         self.save_btn = QPushButton("Save")
         self.load_btn = QPushButton("Load")
+        btn_layout.addWidget(self.add_btn)
+        btn_layout.addWidget(self.remove_btn)
         btn_layout.addWidget(self.run_btn)
         btn_layout.addWidget(self.save_btn)
         btn_layout.addWidget(self.load_btn)
@@ -85,6 +97,8 @@ class ScriptEditor(QDialog):
         layout.addLayout(btn_layout)
 
         self.run_btn.clicked.connect(self.run_script)
+        self.add_btn.clicked.connect(self.add_selected_action)
+        self.remove_btn.clicked.connect(self.remove_selected_step)
         self.save_btn.clicked.connect(self.save_script)
         self.load_btn.clicked.connect(self.load_script)
         self.step_list.itemDoubleClicked.connect(self.edit_step)
@@ -148,4 +162,24 @@ class ScriptEditor(QDialog):
             item.setData(Qt.UserRole, step)
             item.setText(self.format_step(step))
             self.step_list.addItem(item)
+
+    def add_selected_action(self) -> None:
+        """Add the currently selected action from the action list."""
+        item = self.action_list.currentItem()
+        if not item:
+            return
+        action = item.text()
+        data = self.get_default_step(action)
+        new_item = QListWidgetItem()
+        new_item.setData(Qt.UserRole, data)
+        new_item.setText(self.format_step(data))
+        self.step_list.addItem(new_item)
+        if data.get("params"):
+            self.edit_step(new_item)
+
+    def remove_selected_step(self) -> None:
+        """Remove the currently selected step from the sequence."""
+        row = self.step_list.currentRow()
+        if row >= 0:
+            self.step_list.takeItem(row)
 
