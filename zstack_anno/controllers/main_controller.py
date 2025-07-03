@@ -785,7 +785,8 @@ class MainController(QMainWindow):
             "  Seed % + Seed - create mask seeds above intensity percentile\n"
             "  Diff %/Hist % + Int Grow - expand mask using intensity difference and optional histogram cutoff\n\n"
             "Menus provide the same actions as the toolbar.\n"
-            "Zoom with mouse wheel when over the image"
+            "Zoom with mouse wheel when over the image.\n"
+            "Use Tools -> Script Editor to automate sequences of these actions"
         )
         QMessageBox.information(self, "Help", text)
 
