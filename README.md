@@ -3,9 +3,13 @@ unsupervised annotation tool for deep learning data collection
 
 ## Running the GUI
 
-Install the dependencies (e.g. `PyQt5`, `tifffile`, `numpy`, `scipy`, and
-`scikit-image`) and
-run the application with:
+Install the required packages using:
+
+```bash
+pip install -r requirements.txt
+```
+
+After installation, run the application with:
 
 ```bash
 python -m zstack_anno
@@ -28,6 +32,14 @@ original, and an option to clear the blur.  Each adjustment is reapplied to
 the original image so changing strength values will not compound effects.
 Undo and redo are found under
 **Edit**.
+
+## Running the tests
+
+To execute the test suite:
+
+```bash
+pytest
+```
 
 ### Shortcuts
 
