@@ -58,9 +58,12 @@ class StepWidget(QWidget):
         layout.setContentsMargins(2, 2, 2, 2)
         layout.addWidget(QLabel(action))
         for key, value in params.items():
+            layout.addWidget(QLabel(f"{key}:"))
             edit = QLineEdit()
             if value is not None:
                 edit.setText(str(value))
+            else:
+                edit.setPlaceholderText(str(key))
             edit.editingFinished.connect(self._update_item)
             layout.addWidget(edit)
             self._inputs[key] = edit
@@ -195,14 +198,30 @@ class ScriptEditor(QDialog):
             QMessageBox.warning(self, "No Image", "Please load an image first")
             return
         for idx in range(self.step_list.count()):
-            data = self.step_list.item(idx).data(Qt.UserRole)
-            action = data["action"]
+            item = self.step_list.item(idx)
+            data = item.data(Qt.UserRole)
+            if data is None:
+                QMessageBox.warning(self, "Error", f"Step {idx + 1} has no data")
+                return
+            action = data.get("action")
+            if not action:
+                QMessageBox.warning(self, "Error", f"Step {idx + 1} missing action")
+                return
             info = self.ACTIONS.get(action)
             if not info:
                 continue
+            params = data.get("params", {})
+            for key, value in params.items():
+                if value is None:
+                    QMessageBox.warning(
+                        self,
+                        "Error",
+                        f"Parameter '{key}' for action '{action}' is missing",
+                    )
+                    return
             method = getattr(self.controller, info["method"], None)
             if method:
-                method(**data.get("params", {}))
+                method(**params)
 
     def save_script(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Save Script", "", "JSON Files (*.json)")
