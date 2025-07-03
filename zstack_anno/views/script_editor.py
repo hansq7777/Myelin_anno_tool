@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from PyQt5.QtWidgets import (
     QDialog,
@@ -157,7 +158,7 @@ class ScriptEditor(QDialog):
 
         btn_layout = QVBoxLayout()
         self.run_btn = QPushButton("Run")
-        self.run_stack_btn = QPushButton("Run Stack")
+        self.run_stack_btn = QPushButton("Run Stack(s)")
         self.stop_btn = QPushButton("Stop")
         self.pause_btn = QPushButton("Pause")
         self.resume_btn = QPushButton("Resume")
@@ -358,11 +359,39 @@ class ScriptEditor(QDialog):
         self._paused = False
 
     def run_stack(self) -> None:
-        """Run the script on a range of slices in the stack."""
+        """Entry point for running the script on one or more stacks."""
         if self.controller.model.data is None:
             QMessageBox.warning(self, "No Image", "Please load an image first")
             return
 
+        mode = QMessageBox(self)
+        mode.setWindowTitle("Run Stack(s)")
+        mode.setText("Run on current stack or multiple stacks?")
+        current_btn = mode.addButton("Current Stack", QMessageBox.AcceptRole)
+        multi_btn = mode.addButton("Multiple Stacks…", QMessageBox.AcceptRole)
+        cancel_btn = mode.addButton(QMessageBox.Cancel)
+        mode.exec()
+        clicked = mode.clickedButton()
+        if clicked is cancel_btn:
+            return
+        if clicked is multi_btn:
+            self._run_multiple_stacks()
+        else:
+            self._run_single_stack()
+
+    def _run_stack_range(self, start_idx: int, end_idx: int) -> None:
+        """Run the script from ``start_idx`` to ``end_idx`` inclusive."""
+        self.controller.slider.setValue(start_idx)
+        while True:
+            self.run_script()
+            self.controller.script_save()
+            if self.controller.model.index >= end_idx or self._stopped:
+                break
+            self.controller.script_next_slice()
+            QApplication.processEvents()
+
+    def _run_single_stack(self) -> None:
+        """Run the script on the currently loaded stack."""
         msg = QMessageBox(self)
         msg.setWindowTitle("Run Stack")
         msg.setText("Select run mode")
@@ -401,12 +430,54 @@ class ScriptEditor(QDialog):
             start_idx = self.controller.model.index
             end_idx = self.controller.model.n_slices - 1
 
-        self.controller.slider.setValue(start_idx)
-        while True:
-            self.run_script()
-            self.controller.script_save()
-            if self.controller.model.index >= end_idx:
-                break
-            self.controller.script_next_slice()
-            QApplication.processEvents()
+        self._run_stack_range(start_idx, end_idx)
         QMessageBox.information(self, "Run Stack", "Stack segmentation complete")
+
+    def _run_multiple_stacks(self) -> None:
+        """Run the script on a batch of stacks selected by the user."""
+        choice = QMessageBox(self)
+        choice.setWindowTitle("Select Inputs")
+        choice.setText("Choose stacks from a folder or select files")
+        folder_btn = choice.addButton("Folder…", QMessageBox.AcceptRole)
+        files_btn = choice.addButton("Files…", QMessageBox.AcceptRole)
+        cancel_btn = choice.addButton(QMessageBox.Cancel)
+        choice.exec()
+        clicked = choice.clickedButton()
+        if clicked is cancel_btn:
+            return
+        if clicked is folder_btn:
+            folder = QFileDialog.getExistingDirectory(self, "Select Folder")
+            if not folder:
+                return
+            file_list = sorted(
+                [
+                    os.path.join(folder, f)
+                    for f in os.listdir(folder)
+                    if f.lower().endswith((".tif", ".tiff", ".ome.tif"))
+                ]
+            )
+        else:
+            file_list, _ = QFileDialog.getOpenFileNames(
+                self,
+                "Select Stack Files",
+                "",
+                "TIFF Images (*.tif *.tiff *.ome.tif)",
+            )
+            if not file_list:
+                return
+
+        save_folder = QFileDialog.getExistingDirectory(self, "Select Save Folder")
+        if not save_folder:
+            return
+
+        for path in file_list:
+            self.controller.model.load(path)
+            self.controller.slider.setRange(0, self.controller.model.n_slices - 1)
+            self.controller._update_view(reset_view=True)
+            mask_name = os.path.splitext(os.path.basename(path))[0] + "_mask.tif"
+            mask_path = os.path.join(save_folder, mask_name)
+            self.controller.model.create_blank_masks(mask_path)
+            self._run_stack_range(0, self.controller.model.n_slices - 1)
+            if self._stopped:
+                break
+        QMessageBox.information(self, "Run Stacks", "Batch segmentation complete")
