@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 import warnings
+from typing import Callable
 
 try:
     from skimage.morphology import binary_dilation as sk_binary_dilation
@@ -46,7 +47,7 @@ def _print_progress(
     prefix: str,
     current: int,
     total: int,
-    callback: callable | None = None,
+    callback: Callable | None = None,
 ) -> None:
     """Print or callback progress information."""
 
@@ -277,7 +278,7 @@ def intensity_region_grow(
     diff_percent: float = 20.0,
     hist_percent: float | None = None,
     progress: bool = False,
-    progress_fn: callable | None = None,
+    progress_fn: Callable | None = None,
 ) -> np.ndarray:
     """Grow ``mask`` based on intensity similarity.
 
@@ -375,7 +376,7 @@ def filter_linear_components(
     mask: np.ndarray,
     linearity_thresh: float,
     progress: bool = False,
-    progress_fn: callable | None = None,
+    progress_fn: Callable | None = None,
 ) -> np.ndarray:
     """Remove regions with low anisotropy from ``mask``.
 
@@ -463,7 +464,7 @@ def filter_linear_components_stack(
     linearity_thresh: float,
     require_3d_linearity: bool = True,
     progress: bool = False,
-    progress_fn: callable | None = None,
+    progress_fn: Callable | None = None,
 ) -> np.ndarray:
     """Apply ``filter_linear_components`` in 3D.
 
@@ -540,7 +541,7 @@ def filter_linear_bbox(
     ratio_thresh: float,
     coverage_thresh: float = 0.4,
     progress: bool = False,
-    progress_fn: callable | None = None,
+    progress_fn: Callable | None = None,
 ) -> np.ndarray:
     """Fast heuristic to keep elongated components in ``mask``.
 
@@ -580,7 +581,7 @@ def filter_linear_bbox_stack(
     ratio_thresh: float,
     coverage_thresh: float = 0.2,
     progress: bool = False,
-    progress_fn: callable | None = None,
+    progress_fn: Callable | None = None,
 ) -> np.ndarray:
     """Fast 3-D heuristic version of :func:`filter_linear_bbox`."""
 
