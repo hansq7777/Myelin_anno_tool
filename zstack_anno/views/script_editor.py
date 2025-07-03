@@ -1,4 +1,5 @@
 import json
+import time
 from PyQt5.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -12,6 +13,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QApplication,
 )
 from PyQt5.QtCore import Qt
 
@@ -100,6 +102,8 @@ class StepWidget(QWidget):
 
 class ScriptEditor(QDialog):
     ACTIONS = {
+        "Next Slice": {"method": "script_next_slice", "params": {}},
+        "Previous Slice": {"method": "script_prev_slice", "params": {}},
         "Dilate": {"method": "script_dilate", "params": {"iterations": 1}},
         "Erode": {"method": "script_erode", "params": {"iterations": 1}},
         "Filter Small": {"method": "script_filter_small", "params": {"threshold": 100}},
@@ -120,6 +124,7 @@ class ScriptEditor(QDialog):
         super().__init__()
         self.controller = controller
         self.setWindowTitle("Script Editor")
+        self._paused = False
 
         layout = QHBoxLayout(self)
         self.step_list = StepListWidget()
@@ -134,20 +139,27 @@ class ScriptEditor(QDialog):
         layout.addWidget(self.action_list)
 
         btn_layout = QVBoxLayout()
+        self.run_btn = QPushButton("Run")
+        self.pause_btn = QPushButton("Pause")
+        self.resume_btn = QPushButton("Resume")
         self.add_btn = QPushButton("Add")
         self.remove_btn = QPushButton("Remove")
-        self.run_btn = QPushButton("Run")
         self.save_btn = QPushButton("Save")
         self.load_btn = QPushButton("Load")
+        self.run_btn.setStyleSheet("background-color: #007bff; color: white")
+        btn_layout.addWidget(self.run_btn)
+        btn_layout.addWidget(self.pause_btn)
+        btn_layout.addWidget(self.resume_btn)
         btn_layout.addWidget(self.add_btn)
         btn_layout.addWidget(self.remove_btn)
-        btn_layout.addWidget(self.run_btn)
         btn_layout.addWidget(self.save_btn)
         btn_layout.addWidget(self.load_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
         self.run_btn.clicked.connect(self.run_script)
+        self.pause_btn.clicked.connect(self.pause_script)
+        self.resume_btn.clicked.connect(self.resume_script)
         self.add_btn.clicked.connect(self.add_selected_action)
         self.remove_btn.clicked.connect(self.remove_selected_step)
         self.save_btn.clicked.connect(self.save_script)
@@ -236,6 +248,11 @@ class ScriptEditor(QDialog):
             method = getattr(self.controller, info["method"], None)
             if method:
                 method(**params)
+                self.controller.report_action(action, params)
+                QApplication.processEvents()
+                while self._paused:
+                    QApplication.processEvents()
+                    time.sleep(0.1)
 
     def save_script(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -278,3 +295,11 @@ class ScriptEditor(QDialog):
         row = self.step_list.currentRow()
         if row >= 0:
             self.step_list.takeItem(row)
+
+    def pause_script(self) -> None:
+        """Pause execution after the current action."""
+        self._paused = True
+
+    def resume_script(self) -> None:
+        """Resume execution if paused."""
+        self._paused = False
