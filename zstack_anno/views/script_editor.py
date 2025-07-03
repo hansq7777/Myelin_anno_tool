@@ -15,7 +15,8 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QApplication,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QDrag
+from PyQt5.QtCore import Qt, QMimeData
 
 
 class StepListWidget(QListWidget):
@@ -47,6 +48,20 @@ class StepListWidget(QListWidget):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+
+
+class ActionListWidget(QListWidget):
+    """List widget that starts drags with plain text."""
+
+    def startDrag(self, supported_actions):
+        item = self.currentItem()
+        if item is None:
+            return
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setText(item.text())
+        drag.setMimeData(mime)
+        drag.exec_(Qt.CopyAction)
 
 
 class StepWidget(QWidget):
@@ -130,7 +145,7 @@ class ScriptEditor(QDialog):
 
         layout = QHBoxLayout(self)
         self.step_list = StepListWidget()
-        self.action_list = QListWidget()
+        self.action_list = ActionListWidget()
         self.action_list.setDragEnabled(True)
 
         for act in self.ACTIONS.keys():
@@ -142,6 +157,7 @@ class ScriptEditor(QDialog):
 
         btn_layout = QVBoxLayout()
         self.run_btn = QPushButton("Run")
+        self.run_stack_btn = QPushButton("Run Stack")
         self.stop_btn = QPushButton("Stop")
         self.pause_btn = QPushButton("Pause")
         self.resume_btn = QPushButton("Resume")
@@ -151,6 +167,7 @@ class ScriptEditor(QDialog):
         self.load_btn = QPushButton("Load")
         self.run_btn.setStyleSheet("background-color: #007bff; color: white")
         btn_layout.addWidget(self.run_btn)
+        btn_layout.addWidget(self.run_stack_btn)
         btn_layout.addWidget(self.stop_btn)
         btn_layout.addWidget(self.pause_btn)
         btn_layout.addWidget(self.resume_btn)
@@ -162,6 +179,7 @@ class ScriptEditor(QDialog):
         layout.addLayout(btn_layout)
 
         self.run_btn.clicked.connect(self.run_script)
+        self.run_stack_btn.clicked.connect(self.run_stack)
         self.stop_btn.clicked.connect(self.stop_script)
         self.pause_btn.clicked.connect(self.pause_script)
         self.resume_btn.clicked.connect(self.resume_script)
@@ -170,6 +188,7 @@ class ScriptEditor(QDialog):
         self.save_btn.clicked.connect(self.save_script)
         self.load_btn.clicked.connect(self.load_script)
         self.step_list.itemDoubleClicked.connect(self.edit_step)
+        self.action_list.itemDoubleClicked.connect(self.add_action_item)
 
     def add_step(
         self, action: str, params: dict | None = None, prompt: bool = False
@@ -312,6 +331,13 @@ class ScriptEditor(QDialog):
         action = item.text()
         self.add_step(action, prompt=True)
 
+    def add_action_item(self, item: QListWidgetItem) -> None:
+        """Add action by double-clicking in the action list."""
+        if not item:
+            return
+        action = item.text()
+        self.add_step(action, prompt=True)
+
     def remove_selected_step(self) -> None:
         """Remove the currently selected step from the sequence."""
         row = self.step_list.currentRow()
@@ -330,3 +356,17 @@ class ScriptEditor(QDialog):
     def resume_script(self) -> None:
         """Resume execution if paused."""
         self._paused = False
+
+    def run_stack(self) -> None:
+        """Run the script on the remaining slices of the stack."""
+        if self.controller.model.data is None:
+            QMessageBox.warning(self, "No Image", "Please load an image first")
+            return
+        while True:
+            self.run_script()
+            self.controller.script_save()
+            if self.controller.model.index >= self.controller.model.n_slices - 1:
+                break
+            self.controller.script_next_slice()
+            QApplication.processEvents()
+        QMessageBox.information(self, "Run Stack", "Stack segmentation complete")
