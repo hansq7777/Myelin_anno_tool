@@ -100,8 +100,14 @@ class MainController(QMainWindow):
         self.linear_thresh_edit.setPlaceholderText("Lin Th")
         self.linear_btn = QPushButton("Lin Filter")
         self.linear_btn.clicked.connect(self._filter_linear)
+        self.linear2d_btn = QPushButton("Fast 2D")
+        self.linear2d_btn.clicked.connect(self._filter_linear_fast)
+        self.linear3d_btn = QPushButton("Fast 3D")
+        self.linear3d_btn.clicked.connect(self._filter_linear_fast_stack)
         linear_layout.addWidget(self.linear_thresh_edit)
         linear_layout.addWidget(self.linear_btn)
+        linear_layout.addWidget(self.linear2d_btn)
+        linear_layout.addWidget(self.linear3d_btn)
         ctrl.addLayout(linear_layout)
 
         bg_layout = QVBoxLayout()
@@ -198,6 +204,10 @@ class MainController(QMainWindow):
         filter_act.triggered.connect(self._filter_small)
         linear_act = mask_menu.addAction("Filter Linear")
         linear_act.triggered.connect(self._filter_linear)
+        fast2d_act = mask_menu.addAction("Fast Linear 2D")
+        fast2d_act.triggered.connect(self._filter_linear_fast)
+        fast3d_act = mask_menu.addAction("Fast Linear 3D")
+        fast3d_act.triggered.connect(self._filter_linear_fast_stack)
         bg_act = mask_menu.addAction("Remove Background")
         bg_act.triggered.connect(self._apply_bg_filter)
         seed_act = mask_menu.addAction("Seed")
@@ -411,6 +421,34 @@ class MainController(QMainWindow):
         cur = self.model.get_mask()
         new = morphology_tools.filter_linear_components(cur, thresh, progress=True)
         self.model.set_mask(new)
+        self._update_view()
+
+    def _filter_linear_fast(self) -> None:
+        if not self._ensure_masks():
+            return
+        try:
+            thresh = float(self.linear_thresh_edit.text())
+        except ValueError:
+            thresh = 2.0
+        self._push_undo("filter_linear_fast")
+        cur = self.model.get_mask()
+        new = morphology_tools.filter_linear_bbox(cur, thresh, progress=True)
+        self.model.set_mask(new)
+        self._update_view()
+
+    def _filter_linear_fast_stack(self) -> None:
+        if not self._ensure_masks():
+            return
+        try:
+            thresh = float(self.linear_thresh_edit.text())
+        except ValueError:
+            thresh = 2.0
+        self._push_undo("filter_linear_fast_3d")
+        stack = morphology_tools.filter_linear_bbox_stack(
+            self.model.masks, thresh, progress=True
+        )
+        self.model.masks = stack
+        self.model.update_components()
         self._update_view()
 
     def _apply_bg_filter(self) -> None:

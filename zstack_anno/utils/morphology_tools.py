@@ -534,3 +534,80 @@ def filter_linear_components_stack(
 
     return result
 
+
+def filter_linear_bbox(
+    mask: np.ndarray,
+    ratio_thresh: float,
+    coverage_thresh: float = 0.4,
+    progress: bool = False,
+    progress_fn: callable | None = None,
+) -> np.ndarray:
+    """Fast heuristic to keep elongated components in ``mask``.
+
+    A component is considered linear if the aspect ratio of its bounding box is
+    at least ``ratio_thresh`` and the fraction of pixels within that box does
+    not exceed ``coverage_thresh``.
+    """
+
+    labels = label_components(mask)
+    if labels.max() == 0:
+        return mask.copy()
+
+    result = np.zeros_like(mask, dtype=np.uint8)
+    total = int(labels.max())
+    if progress:
+        _print_progress("Fast line 2D", 0, total, callback=progress_fn)
+    for lbl in range(1, labels.max() + 1):
+        if progress:
+            _print_progress("Fast line 2D", lbl, total, callback=progress_fn)
+        component = labels == lbl
+        coords = np.argwhere(component)
+        if coords.size == 0:
+            continue
+        y0, x0 = coords.min(axis=0)
+        y1, x1 = coords.max(axis=0)
+        h = y1 - y0 + 1
+        w = x1 - x0 + 1
+        aspect = max(h, w) / max(1, min(h, w))
+        coverage = coords.shape[0] / float(h * w)
+        if aspect >= ratio_thresh and coverage <= coverage_thresh:
+            result[component] = 1
+    return result
+
+
+def filter_linear_bbox_stack(
+    stack: np.ndarray,
+    ratio_thresh: float,
+    coverage_thresh: float = 0.2,
+    progress: bool = False,
+    progress_fn: callable | None = None,
+) -> np.ndarray:
+    """Fast 3-D heuristic version of :func:`filter_linear_bbox`."""
+
+    labels = _label_components_3d(stack)
+    if labels.max() == 0:
+        return stack.copy()
+
+    result = np.zeros_like(stack, dtype=np.uint8)
+    total = int(labels.max())
+    if progress:
+        _print_progress("Fast line 3D", 0, total, callback=progress_fn)
+    for lbl in range(1, labels.max() + 1):
+        if progress:
+            _print_progress("Fast line 3D", lbl, total, callback=progress_fn)
+        component = labels == lbl
+        coords = np.argwhere(component)
+        if coords.size == 0:
+            continue
+        z0, y0, x0 = coords.min(axis=0)
+        z1, y1, x1 = coords.max(axis=0)
+        dz = z1 - z0 + 1
+        dy = y1 - y0 + 1
+        dx = x1 - x0 + 1
+        dims = sorted((dz, dy, dx), reverse=True)
+        aspect = dims[0] / max(1, dims[1])
+        coverage = coords.shape[0] / float(dz * dy * dx)
+        if aspect >= ratio_thresh and coverage <= coverage_thresh:
+            result[component] = 1
+    return result
+
