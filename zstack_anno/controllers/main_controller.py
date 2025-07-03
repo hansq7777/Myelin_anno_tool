@@ -19,6 +19,7 @@ import sys
 import numpy as np
 from ..models.zstack_model import ZStackModel
 from ..views.canvas import SliceCanvas
+from ..views.script_editor import ScriptEditor
 from ..utils import morphology_tools
 from ..utils.dialogs import question_with_shortcuts
 
@@ -227,6 +228,10 @@ class MainController(QMainWindow):
         self.show_orig_act.setChecked(self.show_orig_chk.isChecked())
         clear_blur_act = image_menu.addAction("Clear Blur")
         clear_blur_act.triggered.connect(self._clear_blur)
+
+        tool_menu = self.menuBar().addMenu("Tools")
+        script_act = tool_menu.addAction("Script Editor")
+        script_act.triggered.connect(self._open_script_editor)
 
         help_menu = self.menuBar().addMenu("Help")
         help_act = help_menu.addAction("Shortcuts && Features")
@@ -536,6 +541,68 @@ class MainController(QMainWindow):
         self.model.set_mask(grown)
         self._update_view()
 
+    # --------- scriptable wrappers ---------
+    def script_dilate(self, iterations: int = 1) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("dilate")
+        cur = self.model.get_mask()
+        new = morphology_tools.dilate(cur, iterations=iterations)
+        self.model.set_mask(new)
+        self._update_view()
+
+    def script_erode(self, iterations: int = 1) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("erode")
+        cur = self.model.get_mask()
+        new = morphology_tools.erode(cur, iterations=iterations)
+        self.model.set_mask(new)
+        self._update_view()
+
+    def script_filter_small(self, threshold: int = 100) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("filter")
+        cur = self.model.get_mask()
+        new = morphology_tools.remove_small(cur, threshold)
+        self.model.set_mask(new)
+        self._update_view()
+
+    def script_seed(self, percentile: float = 90.0) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("seed")
+        img = self.model.get_current()
+        cur = self.model.get_mask()
+        seeds = morphology_tools.sample_seeds(img, percentile, num_seeds=20000)
+        cur = cur.copy()
+        cur[seeds > 0] = 1
+        self.model.set_mask(cur)
+        self._update_view()
+
+    def script_int_grow(self, diff_pct: float = 20.0, hist_pct: float | None = None) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("int_grow")
+        img = self.model.get_current()
+        cur = self.model.get_mask()
+        grown = morphology_tools.intensity_region_grow(
+            img.astype(float), cur, diff_pct, hist_pct, progress=True
+        )
+        self.model.set_mask(grown)
+        self._update_view()
+
+    def script_blur(self, sigma: float = 1.0) -> None:
+        if self.model.data is None:
+            return
+        self.model.apply_gaussian_blur(sigma)
+        self._update_view()
+
+    def script_clear_blur(self) -> None:
+        self.model.remove_gaussian_blur()
+        self._update_view()
+
     def _undo(self) -> None:
         if not self.undo_stack:
             return
@@ -734,4 +801,9 @@ class MainController(QMainWindow):
             "Zoom with mouse wheel when over the image"
         )
         QMessageBox.information(self, "Help", text)
+
+    def _open_script_editor(self) -> None:
+        """Open the script editor window."""
+        dlg = ScriptEditor(self)
+        dlg.exec_()
 
