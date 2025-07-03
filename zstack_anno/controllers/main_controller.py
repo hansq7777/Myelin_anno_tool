@@ -409,7 +409,7 @@ class MainController(QMainWindow):
             thresh = 2.0
         self._push_undo("filter_linear")
         cur = self.model.get_mask()
-        new = morphology_tools.filter_linear_components(cur, thresh)
+        new = morphology_tools.filter_linear_components(cur, thresh, progress=True)
         self.model.set_mask(new)
         self._update_view()
 
@@ -493,7 +493,7 @@ class MainController(QMainWindow):
         img = self.model.get_current()
         cur = self.model.get_mask()
         grown = morphology_tools.intensity_region_grow(
-            img.astype(float), cur, diff_pct, hist_pct
+            img.astype(float), cur, diff_pct, hist_pct, progress=True
         )
         self.model.set_mask(grown)
         self._update_view()
