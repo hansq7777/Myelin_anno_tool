@@ -603,6 +603,14 @@ class MainController(QMainWindow):
         self.model.remove_gaussian_blur()
         self._update_view()
 
+    def script_bg_filter(self, percentile: float = 0.0) -> None:
+        """Remove low intensity pixels from the mask using percentile."""
+        if not self._ensure_masks():
+            return
+        self._push_undo("bg_filter")
+        self.model.remove_background(percentile)
+        self._update_view()
+
     def _undo(self) -> None:
         if not self.undo_stack:
             return
