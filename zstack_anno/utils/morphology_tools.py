@@ -534,3 +534,74 @@ def filter_linear_components_stack(
 
     return result
 
+
+def filter_linear_fast(
+    mask: np.ndarray,
+    ratio_thresh: float,
+    progress: bool = False,
+    progress_fn: callable | None = None,
+) -> np.ndarray:
+    """Quick linearity filter based on skeleton length.
+
+    Components are skeletonised and the length ratio between skeleton pixels
+    and total pixels is used as a simple linearity estimate. Components with a
+    ratio below ``ratio_thresh`` are removed.
+    """
+    labels = label_components(mask)
+    if labels.max() == 0:
+        return mask.copy()
+
+    result = np.zeros_like(mask, dtype=np.uint8)
+    total = int(labels.max())
+    if progress:
+        _print_progress("Lin fast", 0, total, callback=progress_fn)
+    for lbl in range(1, labels.max() + 1):
+        if progress:
+            _print_progress("Lin fast", lbl, total, callback=progress_fn)
+        component = labels == lbl
+        if component.sum() <= 2:
+            continue
+        if skeletonize is not None:  # pragma: no cover - optional dependency
+            skel = skeletonize(component > 0)
+        else:
+            skel = _skeletonize_numpy(component > 0)
+        ratio = float(skel.sum()) / float(component.sum()) if component.sum() > 0 else 0.0
+        if ratio >= ratio_thresh:
+            result[component] = 1
+    return result
+
+
+def filter_linear_fast_stack(
+    stack: np.ndarray,
+    ratio_thresh: float,
+    progress: bool = False,
+    progress_fn: callable | None = None,
+) -> np.ndarray:
+    """Apply ``filter_linear_fast`` to a 3-D stack."""
+    labels = _label_components_3d(stack)
+    if labels.max() == 0:
+        return stack.copy()
+
+    result = np.zeros_like(stack, dtype=np.uint8)
+    total = int(labels.max())
+    if progress:
+        _print_progress("Lin fast3D", 0, total, callback=progress_fn)
+    for lbl in range(1, labels.max() + 1):
+        if progress:
+            _print_progress("Lin fast3D", lbl, total, callback=progress_fn)
+        component = labels == lbl
+        if component.sum() <= 2:
+            continue
+        skel_len = 0
+        for z in range(component.shape[0]):
+            slice_comp = component[z]
+            if skeletonize is not None:  # pragma: no cover - optional dependency
+                skel = skeletonize(slice_comp > 0)
+            else:
+                skel = _skeletonize_numpy(slice_comp > 0)
+            skel_len += int(skel.sum())
+        ratio = float(skel_len) / float(component.sum()) if component.sum() > 0 else 0.0
+        if ratio >= ratio_thresh:
+            result[component] = 1
+    return result
+

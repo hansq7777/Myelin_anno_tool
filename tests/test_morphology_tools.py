@@ -14,6 +14,8 @@ from zstack_anno.utils.morphology_tools import (
     intensity_region_grow,
     filter_linear_components,
     filter_linear_components_stack,
+    filter_linear_fast,
+    filter_linear_fast_stack,
 )
 
 
@@ -138,4 +140,24 @@ def test_filter_linear_components_stack_keep_isotropic():
         stack, linearity_thresh=2.0, require_3d_linearity=False
     )
     assert np.array_equal(result, stack)
+
+
+def test_filter_linear_fast():
+    mask = np.zeros((10, 10), dtype=np.uint8)
+    mask[1:9, 5] = 1
+    mask[2:5, 2:5] = 1
+    filtered = filter_linear_fast(mask, ratio_thresh=0.5)
+    assert filtered[1:9, 5].sum() == 8
+    assert filtered[2:5, 2:5].sum() == 0
+
+
+def test_filter_linear_fast_stack():
+    stack = np.zeros((3, 6, 6), dtype=np.uint8)
+    stack[0, 2, 3] = 1
+    stack[1, 2, 3] = 1
+    stack[2, 2, 3] = 1
+    stack[0:2, 0:2, 0:2] = 1
+    result = filter_linear_fast_stack(stack, ratio_thresh=0.5)
+    assert np.all(result[:, 2, 3] == 1)
+    assert result[0:2, 0:2, 0:2].sum() == 0
 
