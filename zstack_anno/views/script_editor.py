@@ -25,12 +25,14 @@ class StepListWidget(QListWidget):
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
+            event.setDropAction(Qt.CopyAction)
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
         if event.mimeData().hasText():
+            event.setDropAction(Qt.CopyAction)
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
@@ -38,7 +40,8 @@ class StepListWidget(QListWidget):
     def dropEvent(self, event):
         if event.source() is not self and event.mimeData().hasText():
             action = event.mimeData().text()
-            self.parent().add_step(action)
+            self.parent().add_step(action, prompt=True)
+            event.setDropAction(Qt.CopyAction)
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
@@ -100,14 +103,14 @@ class ScriptEditor(QDialog):
         "Dilate": {"method": "script_dilate", "params": {"iterations": 1}},
         "Erode": {"method": "script_erode", "params": {"iterations": 1}},
         "Filter Small": {"method": "script_filter_small", "params": {"threshold": 100}},
-        "Seed": {"method": "script_seed", "params": {"percentile": 90.0}},
+        "Seed": {"method": "script_seed", "params": {"percentile": 85.0}},
         "Intensity Grow": {
             "method": "script_int_grow",
-            "params": {"diff_pct": 20.0, "hist_pct": None},
+            "params": {"diff_pct": 50.0, "hist_pct": 20.0},
         },
         "Background Filter": {
             "method": "script_bg_filter",
-            "params": {"percentile": 0.0},
+            "params": {"percentile": 10.0},
         },
         "Gaussian Blur": {"method": "script_blur", "params": {"sigma": 1.0}},
         "Clear Blur": {"method": "script_clear_blur", "params": {}},
@@ -151,14 +154,25 @@ class ScriptEditor(QDialog):
         self.load_btn.clicked.connect(self.load_script)
         self.step_list.itemDoubleClicked.connect(self.edit_step)
 
-    def add_step(self, action: str, params: dict | None = None) -> QListWidgetItem:
+    def add_step(
+        self, action: str, params: dict | None = None, prompt: bool = False
+    ) -> QListWidgetItem:
         data = self.get_default_step(action)
         if params:
             data["params"].update(params)
+        if prompt:
+            for key, value in data["params"].items():
+                text, ok = QInputDialog.getText(self, action, key, text=str(value))
+                if ok:
+                    try:
+                        if isinstance(value, int):
+                            data["params"][key] = int(text)
+                        else:
+                            data["params"][key] = float(text)
+                    except ValueError:
+                        pass
         item = QListWidgetItem()
         widget = StepWidget(item, action, data.get("params", {}))
-        if params:
-            widget.set_params(data["params"])
         item.setText("")
         item.setSizeHint(widget.sizeHint())
         self.step_list.addItem(item)
@@ -224,15 +238,22 @@ class ScriptEditor(QDialog):
                 method(**params)
 
     def save_script(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Save Script", "", "JSON Files (*.json)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Script", "", "JSON Files (*.json)"
+        )
         if not path:
             return
-        steps = [self.step_list.item(i).data(Qt.UserRole) for i in range(self.step_list.count())]
+        steps = [
+            self.step_list.item(i).data(Qt.UserRole)
+            for i in range(self.step_list.count())
+        ]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(steps, f, indent=2)
 
     def load_script(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Load Script", "", "JSON Files (*.json)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Script", "", "JSON Files (*.json)"
+        )
         if not path:
             return
         try:
@@ -250,11 +271,10 @@ class ScriptEditor(QDialog):
         if not item:
             return
         action = item.text()
-        self.add_step(action)
+        self.add_step(action, prompt=True)
 
     def remove_selected_step(self) -> None:
         """Remove the currently selected step from the sequence."""
         row = self.step_list.currentRow()
         if row >= 0:
             self.step_list.takeItem(row)
-
