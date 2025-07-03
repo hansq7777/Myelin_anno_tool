@@ -8,6 +8,10 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QFileDialog,
     QInputDialog,
+    QWidget,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
 )
 from PyQt5.QtCore import Qt
 
@@ -34,17 +38,58 @@ class StepListWidget(QListWidget):
     def dropEvent(self, event):
         if event.source() is not self and event.mimeData().hasText():
             action = event.mimeData().text()
-            data = self.parent().get_default_step(action)
-            item = QListWidgetItem()
-            item.setData(Qt.UserRole, data)
-            item.setText(self.parent().format_step(data))
-            self.addItem(item)
-            # prompt for parameters immediately when dropping
-            if data.get("params"):
-                self.parent().edit_step(item)
+            self.parent().add_step(action)
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+
+
+class StepWidget(QWidget):
+    """Widget used to edit parameters for a script step."""
+
+    def __init__(self, item: QListWidgetItem, action: str, params: dict):
+        super().__init__()
+        self._item = item
+        self._action = action
+        self._defaults = params.copy()
+        self._inputs: dict[str, QLineEdit] = {}
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.addWidget(QLabel(action))
+        for key, value in params.items():
+            edit = QLineEdit()
+            if value is not None:
+                edit.setText(str(value))
+            edit.editingFinished.connect(self._update_item)
+            layout.addWidget(edit)
+            self._inputs[key] = edit
+        layout.addStretch(1)
+        self._update_item()
+
+    def _update_item(self) -> None:
+        params: dict[str, object] = {}
+        for key, edit in self._inputs.items():
+            text = edit.text().strip()
+            default = self._defaults.get(key)
+            if text == "":
+                params[key] = default
+                continue
+            try:
+                if isinstance(default, int):
+                    params[key] = int(text)
+                else:
+                    params[key] = float(text)
+            except ValueError:
+                params[key] = default
+        data = {"action": self._action, "params": params}
+        self._item.setData(Qt.UserRole, data)
+
+    def set_params(self, params: dict) -> None:
+        for key, value in params.items():
+            if key in self._inputs:
+                self._inputs[key].setText("" if value is None else str(value))
+        self._update_item()
 
 
 class ScriptEditor(QDialog):
@@ -103,6 +148,20 @@ class ScriptEditor(QDialog):
         self.load_btn.clicked.connect(self.load_script)
         self.step_list.itemDoubleClicked.connect(self.edit_step)
 
+    def add_step(self, action: str, params: dict | None = None) -> QListWidgetItem:
+        data = self.get_default_step(action)
+        if params:
+            data["params"].update(params)
+        item = QListWidgetItem()
+        widget = StepWidget(item, action, data.get("params", {}))
+        if params:
+            widget.set_params(data["params"])
+        item.setText("")
+        item.setSizeHint(widget.sizeHint())
+        self.step_list.addItem(item)
+        self.step_list.setItemWidget(item, widget)
+        return item
+
     def get_default_step(self, action: str) -> dict:
         info = self.ACTIONS.get(action, {})
         return {"action": action, "params": info.get("params", {}).copy()}
@@ -113,6 +172,9 @@ class ScriptEditor(QDialog):
 
     def edit_step(self, item: QListWidgetItem) -> None:
         data = item.data(Qt.UserRole)
+        if data is None:
+            QMessageBox.warning(self, "Error", "No step data")
+            return
         params = data.get("params", {})
         for key, value in params.items():
             text, ok = QInputDialog.getText(self, data["action"], key, text=str(value))
@@ -129,6 +191,9 @@ class ScriptEditor(QDialog):
         item.setText(self.format_step(data))
 
     def run_script(self) -> None:
+        if self.controller.model.data is None:
+            QMessageBox.warning(self, "No Image", "Please load an image first")
+            return
         for idx in range(self.step_list.count()):
             data = self.step_list.item(idx).data(Qt.UserRole)
             action = data["action"]
@@ -158,10 +223,7 @@ class ScriptEditor(QDialog):
             return
         self.step_list.clear()
         for step in steps:
-            item = QListWidgetItem()
-            item.setData(Qt.UserRole, step)
-            item.setText(self.format_step(step))
-            self.step_list.addItem(item)
+            self.add_step(step["action"], step.get("params", {}))
 
     def add_selected_action(self) -> None:
         """Add the currently selected action from the action list."""
@@ -169,13 +231,7 @@ class ScriptEditor(QDialog):
         if not item:
             return
         action = item.text()
-        data = self.get_default_step(action)
-        new_item = QListWidgetItem()
-        new_item.setData(Qt.UserRole, data)
-        new_item.setText(self.format_step(data))
-        self.step_list.addItem(new_item)
-        if data.get("params"):
-            self.edit_step(new_item)
+        self.add_step(action)
 
     def remove_selected_step(self) -> None:
         """Remove the currently selected step from the sequence."""
