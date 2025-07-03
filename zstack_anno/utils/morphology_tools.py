@@ -42,8 +42,18 @@ if nd_binary_dilation is None or sk_binary_dilation is None:
     )
 
 
-def _print_progress(prefix: str, current: int, total: int) -> None:
-    """Print a simple progress bar."""
+def _print_progress(
+    prefix: str,
+    current: int,
+    total: int,
+    callback: callable | None = None,
+) -> None:
+    """Print or callback progress information."""
+
+    if callback is not None:
+        callback(current, total)
+        return
+
     bar_len = 20
     filled = int(bar_len * current / float(total)) if total else 0
     bar = "#" * filled + "-" * (bar_len - filled)
@@ -267,6 +277,7 @@ def intensity_region_grow(
     diff_percent: float = 20.0,
     hist_percent: float | None = None,
     progress: bool = False,
+    progress_fn: callable | None = None,
 ) -> np.ndarray:
     """Grow ``mask`` based on intensity similarity.
 
@@ -284,9 +295,11 @@ def intensity_region_grow(
         thresh = float(np.percentile(slice_, hist_percent))
 
     total = len(unique)
+    if progress:
+        _print_progress("Int grow", 0, total, callback=progress_fn)
     for idx, lv in enumerate(unique, start=1):
         if progress:
-            _print_progress("Int grow", idx, total)
+            _print_progress("Int grow", idx, total, callback=progress_fn)
         region = labels == lv
         if not np.any(region):
             continue
@@ -359,7 +372,10 @@ def _skeleton_segments(component: np.ndarray) -> np.ndarray:
 
 
 def filter_linear_components(
-    mask: np.ndarray, linearity_thresh: float, progress: bool = False
+    mask: np.ndarray,
+    linearity_thresh: float,
+    progress: bool = False,
+    progress_fn: callable | None = None,
 ) -> np.ndarray:
     """Remove regions with low anisotropy from ``mask``.
 
@@ -375,9 +391,11 @@ def filter_linear_components(
 
     result = np.zeros_like(mask, dtype=np.uint8)
     total = int(labels.max())
+    if progress:
+        _print_progress("Lin filter", 0, total, callback=progress_fn)
     for lbl in range(1, labels.max() + 1):
         if progress:
-            _print_progress("Lin filter", lbl, total)
+            _print_progress("Lin filter", lbl, total, callback=progress_fn)
         component = labels == lbl
         seg_labels = _skeleton_segments(component)
         keep = np.zeros_like(component, dtype=np.uint8)
@@ -445,6 +463,7 @@ def filter_linear_components_stack(
     linearity_thresh: float,
     require_3d_linearity: bool = True,
     progress: bool = False,
+    progress_fn: callable | None = None,
 ) -> np.ndarray:
     """Apply ``filter_linear_components`` in 3D.
 
@@ -459,9 +478,11 @@ def filter_linear_components_stack(
 
     result = np.zeros_like(stack, dtype=np.uint8)
     total = int(labels.max())
+    if progress:
+        _print_progress("Lin filter", 0, total, callback=progress_fn)
     for lbl in range(1, labels.max() + 1):
         if progress:
-            _print_progress("Lin filter", lbl, total)
+            _print_progress("Lin filter", lbl, total, callback=progress_fn)
         component = labels == lbl
         if require_3d_linearity:
             coords = np.argwhere(component).astype(float)
