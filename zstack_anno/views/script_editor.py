@@ -118,6 +118,7 @@ class ScriptEditor(QDialog):
         },
         "Gaussian Blur": {"method": "script_blur", "params": {"sigma": 1.0}},
         "Clear Blur": {"method": "script_clear_blur", "params": {}},
+        "Save": {"method": "script_save", "params": {}},
     }
 
     def __init__(self, controller):
@@ -125,6 +126,7 @@ class ScriptEditor(QDialog):
         self.controller = controller
         self.setWindowTitle("Script Editor")
         self._paused = False
+        self._stopped = False
 
         layout = QHBoxLayout(self)
         self.step_list = StepListWidget()
@@ -140,6 +142,7 @@ class ScriptEditor(QDialog):
 
         btn_layout = QVBoxLayout()
         self.run_btn = QPushButton("Run")
+        self.stop_btn = QPushButton("Stop")
         self.pause_btn = QPushButton("Pause")
         self.resume_btn = QPushButton("Resume")
         self.add_btn = QPushButton("Add")
@@ -148,6 +151,7 @@ class ScriptEditor(QDialog):
         self.load_btn = QPushButton("Load")
         self.run_btn.setStyleSheet("background-color: #007bff; color: white")
         btn_layout.addWidget(self.run_btn)
+        btn_layout.addWidget(self.stop_btn)
         btn_layout.addWidget(self.pause_btn)
         btn_layout.addWidget(self.resume_btn)
         btn_layout.addWidget(self.add_btn)
@@ -158,6 +162,7 @@ class ScriptEditor(QDialog):
         layout.addLayout(btn_layout)
 
         self.run_btn.clicked.connect(self.run_script)
+        self.stop_btn.clicked.connect(self.stop_script)
         self.pause_btn.clicked.connect(self.pause_script)
         self.resume_btn.clicked.connect(self.resume_script)
         self.add_btn.clicked.connect(self.add_selected_action)
@@ -223,7 +228,11 @@ class ScriptEditor(QDialog):
         if self.controller.model.data is None:
             QMessageBox.warning(self, "No Image", "Please load an image first")
             return
+        self._paused = False
+        self._stopped = False
         for idx in range(self.step_list.count()):
+            if self._stopped:
+                break
             item = self.step_list.item(idx)
             data = item.data(Qt.UserRole)
             if data is None:
@@ -247,12 +256,20 @@ class ScriptEditor(QDialog):
                     return
             method = getattr(self.controller, info["method"], None)
             if method:
+                prev_index = self.controller.model.index
                 method(**params)
                 self.controller.report_action(action, params)
                 QApplication.processEvents()
-                while self._paused:
+                if (
+                    action == "Next Slice"
+                    and self.controller.model.index == prev_index
+                ):
+                    self._stopped = True
+                while self._paused and not self._stopped:
                     QApplication.processEvents()
                     time.sleep(0.1)
+                if self._stopped:
+                    break
 
     def save_script(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -280,7 +297,12 @@ class ScriptEditor(QDialog):
             return
         self.step_list.clear()
         for step in steps:
-            self.add_step(step["action"], step.get("params", {}))
+            if not isinstance(step, dict):
+                continue
+            action = step.get("action")
+            if not action:
+                continue
+            self.add_step(action, step.get("params", {}))
 
     def add_selected_action(self) -> None:
         """Add the currently selected action from the action list."""
@@ -295,6 +317,11 @@ class ScriptEditor(QDialog):
         row = self.step_list.currentRow()
         if row >= 0:
             self.step_list.takeItem(row)
+
+    def stop_script(self) -> None:
+        """Stop execution after the current action."""
+        self._stopped = True
+        self._paused = False
 
     def pause_script(self) -> None:
         """Pause execution after the current action."""

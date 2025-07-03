@@ -177,7 +177,9 @@ class MainController(QMainWindow):
 
         quick_save_act = file_menu.addAction("Quick Save")
         quick_save_act.triggered.connect(self._quick_save_masks)
-        quick_save_act.setShortcuts(["Alt+S", "Meta+S"])
+        # support Command+S on macOS while keeping the existing Option+S
+        # shortcut. Ctrl+S is also added for consistency on other platforms.
+        quick_save_act.setShortcuts(["Alt+S", "Ctrl+S", "Meta+S"])
 
         save_mask_act = file_menu.addAction("Save Masks…")
         save_mask_act.triggered.connect(self._save_masks)
@@ -360,7 +362,8 @@ class MainController(QMainWindow):
             self.slider.setValue(min(self.model.n_slices - 1, self.slider.value() + 1))
         elif (
             event.key() == Qt.Key_S
-            and event.modifiers() in (Qt.AltModifier, Qt.MetaModifier)
+            and event.modifiers()
+            in (Qt.AltModifier, Qt.ControlModifier, Qt.MetaModifier)
         ):
             self._quick_save_masks()
         elif event.key() == Qt.Key_D:
@@ -576,6 +579,10 @@ class MainController(QMainWindow):
 
     def script_prev_slice(self) -> None:
         self._prev_slice()
+
+    def script_save(self) -> None:
+        """Save current masks using the quick save logic."""
+        self._quick_save_masks()
 
     def report_action(self, action: str, params: dict) -> None:
         path = os.path.basename(self.model.path or "")
