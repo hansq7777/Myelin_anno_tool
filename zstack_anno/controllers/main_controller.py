@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QEvent, QPoint
 import sys
+import os
 import numpy as np
 from ..models.zstack_model import ZStackModel
 from ..views.canvas import SliceCanvas
@@ -629,6 +630,19 @@ class MainController(QMainWindow):
         self._push_undo("bg_filter")
         self.model.remove_background(percentile)
         self._update_view()
+
+    def script_next_slice(self) -> None:
+        self._next_slice()
+
+    def script_prev_slice(self) -> None:
+        self._prev_slice()
+
+    def report_action(self, action: str, params: dict) -> None:
+        path = os.path.basename(self.model.path or "")
+        msg_params = ", ".join(f"{k}={v}" for k, v in params.items())
+        print(
+            f"{path} slice {self.model.index + 1}/{self.model.n_slices}: {action} {msg_params}"
+        )
 
     def _undo(self) -> None:
         if not self.undo_stack:
