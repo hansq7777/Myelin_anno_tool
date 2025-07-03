@@ -358,14 +358,54 @@ class ScriptEditor(QDialog):
         self._paused = False
 
     def run_stack(self) -> None:
-        """Run the script on the remaining slices of the stack."""
+        """Run the script on a range of slices in the stack."""
         if self.controller.model.data is None:
             QMessageBox.warning(self, "No Image", "Please load an image first")
             return
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Run Stack")
+        msg.setText("Select run mode")
+        current_btn = msg.addButton("Current to End", QMessageBox.AcceptRole)
+        range_btn = msg.addButton("Slice Range…", QMessageBox.AcceptRole)
+        cancel_btn = msg.addButton(QMessageBox.Cancel)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked is cancel_btn:
+            return
+        if clicked is range_btn:
+            total = self.controller.model.n_slices
+            start, ok = QInputDialog.getInt(
+                self,
+                "Start Slice",
+                "Start slice (1-{}):".format(total),
+                self.controller.model.index + 1,
+                1,
+                total,
+            )
+            if not ok:
+                return
+            end, ok = QInputDialog.getInt(
+                self,
+                "End Slice",
+                "End slice ({}-{}):".format(start, total),
+                total,
+                start,
+                total,
+            )
+            if not ok:
+                return
+            start_idx = start - 1
+            end_idx = end - 1
+        else:
+            start_idx = self.controller.model.index
+            end_idx = self.controller.model.n_slices - 1
+
+        self.controller.slider.setValue(start_idx)
         while True:
             self.run_script()
             self.controller.script_save()
-            if self.controller.model.index >= self.controller.model.n_slices - 1:
+            if self.controller.model.index >= end_idx:
                 break
             self.controller.script_next_slice()
             QApplication.processEvents()
