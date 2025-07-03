@@ -36,3 +36,4 @@ Undo and redo are found under
 - `H` – switch to hand tool (panning)
 - Arrow keys – navigate slices
 - Right click drag – delete masks touching the selection rectangle
+- `⌘S` (macOS) / `Alt+S` (Windows) – quick save masks

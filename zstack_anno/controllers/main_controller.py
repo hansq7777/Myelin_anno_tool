@@ -187,6 +187,11 @@ class MainController(QMainWindow):
         open_mask_act = file_menu.addAction("Open Masks…")
         open_mask_act.triggered.connect(self._open_masks)
         open_mask_act.setShortcuts(["Ctrl+Shift+M", "Meta+Shift+M"])
+
+        quick_save_act = file_menu.addAction("Quick Save")
+        quick_save_act.triggered.connect(self._quick_save_masks)
+        quick_save_act.setShortcuts(["Alt+S", "Meta+S"])
+
         save_mask_act = file_menu.addAction("Save Masks…")
         save_mask_act.triggered.connect(self._save_masks)
 
@@ -268,6 +273,15 @@ class MainController(QMainWindow):
         )
         if path:
             self.model.save_masks(path)
+
+    def _quick_save_masks(self) -> None:
+        """Save masks to existing path or prompt for one if needed."""
+        if self.model.masks is None:
+            return
+        if self.model.mask_path is None:
+            self._save_masks()
+        else:
+            self.model.save_masks()
 
     def _create_masks(self):
         if self.model.data is None:
@@ -363,6 +377,11 @@ class MainController(QMainWindow):
             self.slider.setValue(max(0, self.slider.value() - 1))
         elif event.key() in (Qt.Key_Down, Qt.Key_Right):
             self.slider.setValue(min(self.model.n_slices - 1, self.slider.value() + 1))
+        elif (
+            event.key() == Qt.Key_S
+            and event.modifiers() in (Qt.AltModifier, Qt.MetaModifier)
+        ):
+            self._quick_save_masks()
         elif event.key() == Qt.Key_D:
             self._dilate_current()
         elif event.key() == Qt.Key_E:
