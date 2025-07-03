@@ -32,6 +32,13 @@ the original image so changing strength values will not compound effects.
 Undo and redo are found under
 **Edit**.
 
+### Script Editor
+
+The **Tools** menu opens a Script Editor for building simple automation
+workflows. Drag actions from the list on the right into the sequence on the
+left, adjust their parameters, then run, pause or stop the script. Sequences can
+be saved to or loaded from JSON files.
+
 ## Running the tests
 
 To execute the test suite:
