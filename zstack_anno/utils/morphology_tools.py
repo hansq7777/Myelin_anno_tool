@@ -199,14 +199,30 @@ def histogram_stretch_stack(stack: np.ndarray, percentile: float) -> np.ndarray:
 
 
 def remove_mask_background(
-    image: np.ndarray, mask: np.ndarray, percentile: float
+    image: np.ndarray,
+    mask: np.ndarray,
+    percentile: float,
+    *,
+    progress: bool = False,
+    progress_fn: Callable | None = None,
 ) -> np.ndarray:
     """Remove lowest intensity pixels within ``mask`` based on percentile.
 
     The threshold is computed independently for each connected component in the
-    mask.  Pixels are removed from a component if their value is strictly below
-    the percentile of that component's intensities.  If ``mask`` contains no
+    mask. Pixels are removed from a component if their value is strictly below
+    the percentile of that component's intensities. If ``mask`` contains no
     pixels, a copy of ``mask`` is returned unchanged.
+
+    Parameters
+    ----------
+    image, mask:
+        Input slice and corresponding mask.
+    percentile:
+        Intensity percentile threshold.
+    progress:
+        If ``True``, report progress for each connected component.
+    progress_fn:
+        Optional callback for progress updates.
     """
 
     values = image[mask > 0]
@@ -215,7 +231,12 @@ def remove_mask_background(
 
     labels = label_components(mask)
     result = mask.copy()
-    for lbl in range(1, labels.max() + 1):
+    total = labels.max()
+    if progress:
+        _print_progress("BG filter", 0, total, callback=progress_fn)
+    for idx, lbl in enumerate(range(1, total + 1), start=1):
+        if progress:
+            _print_progress("BG filter", idx, total, callback=progress_fn)
         region = labels == lbl
         if not np.any(region):
             continue

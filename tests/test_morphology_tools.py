@@ -146,4 +146,24 @@ def test_remove_mask_background_stack_progress():
     assert calls[-1] == (len(imgs), len(imgs))
 
 
+def test_remove_mask_background_progress():
+    img = np.array([[10, 20], [30, 40]], dtype=np.uint8)
+    mask = np.ones_like(img, dtype=np.uint8)
+    calls: list[tuple[int, int]] = []
+
+    def cb(cur: int, total: int) -> None:
+        calls.append((cur, total))
+
+    result = remove_mask_background(
+        img,
+        mask,
+        50,
+        progress=True,
+        progress_fn=cb,
+    )
+    assert result.shape == img.shape
+    assert calls[0] == (0, 1)
+    assert calls[-1] == (1, 1)
+
+
 

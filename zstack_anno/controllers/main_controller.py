@@ -427,7 +427,7 @@ class MainController(QMainWindow):
         except ValueError:
             pct = 0.0
         self._push_undo("bg_filter")
-        self.model.remove_background(pct)
+        self.model.remove_background(pct, progress=True)
         self._update_view()
 
     def _apply_stretch(self) -> None:
@@ -571,7 +571,7 @@ class MainController(QMainWindow):
         if not self._ensure_masks():
             return
         self._push_undo("bg_filter")
-        self.model.remove_background(percentile)
+        self.model.remove_background(percentile, progress=True)
         self._update_view()
 
     def script_next_slice(self) -> None:
