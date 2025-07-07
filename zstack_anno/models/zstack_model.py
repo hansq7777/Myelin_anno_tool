@@ -1,4 +1,5 @@
 import os
+from typing import Callable
 import tifffile
 import numpy as np
 from ..utils.morphology_tools import (
@@ -226,7 +227,12 @@ class ZStackModel:
         self.show_original = not self.show_original
 
     def remove_background(
-        self, percentile: float, slice_idx: int | None = None
+        self,
+        percentile: float,
+        slice_idx: int | None = None,
+        *,
+        progress: bool = False,
+        progress_fn: Callable | None = None,
     ) -> None:
         """Remove low intensity pixels from the mask on ``slice_idx``."""
         if self.data is None or self.masks is None:
@@ -235,7 +241,13 @@ class ZStackModel:
             slice_idx = self.index
         img = self.data[slice_idx]
         mask = self.masks[slice_idx]
-        new_mask = remove_mask_background(img, mask, percentile)
+        new_mask = remove_mask_background(
+            img,
+            mask,
+            percentile,
+            progress=progress,
+            progress_fn=progress_fn,
+        )
         self.set_mask(new_mask, slice_idx)
 
     # --------- utility methods ---------
