@@ -55,3 +55,4 @@ pytest
 - Arrow keys – navigate slices
 - Right click drag – delete masks touching the selection rectangle
 - `⌘S` (macOS) / `Alt+S` (Windows) – quick save masks
+- `⌘E` or `⌥E` (macOS) / `Alt+E` (Windows) – open the Script Editor
