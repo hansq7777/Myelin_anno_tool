@@ -1,4 +1,5 @@
 import sys
+import time
 import numpy as np
 import warnings
 from typing import Callable
@@ -48,6 +49,8 @@ if nd_binary_dilation is None or sk_binary_dilation is None:
         RuntimeWarning,
     )
 
+_START_TIMES: dict[tuple[str, int | None], float] = {}
+
 
 def _print_progress(
     prefix: str,
@@ -70,16 +73,36 @@ def _print_progress(
     line:
         If provided, update the specified console line to allow multiple
         progress bars to be shown in parallel.
+    
+    Displays an estimated remaining time when printed to the console.
     """
 
+    key = (prefix, line)
     if callback is not None:
         callback(current, total)
+        if current == 0:
+            _START_TIMES.pop(key, None)
         return
+    if current == 0:
+        _START_TIMES[key] = time.monotonic()
 
     bar_len = 20
     filled = int(bar_len * current / float(total)) if total else 0
     bar = "#" * filled + "-" * (bar_len - filled)
-    msg = f"{prefix} [{bar}] {current}/{total}"
+
+    start = _START_TIMES.get(key)
+    eta_msg = ""
+    if start is not None:
+        elapsed = time.monotonic() - start
+        if current >= total:
+            eta_msg = f" time {elapsed:.1f}s"
+            _START_TIMES.pop(key, None)
+        elif current > 0:
+            rate = elapsed / current
+            eta = rate * (total - current)
+            eta_msg = f" ETA {eta:.1f}s"
+
+    msg = f"{prefix} [{bar}] {current}/{total}{eta_msg}"
 
     if line is not None:
         sys.stdout.write("\x1b7")  # save cursor
