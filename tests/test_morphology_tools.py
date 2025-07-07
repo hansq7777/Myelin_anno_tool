@@ -146,6 +146,22 @@ def test_remove_mask_background_stack_progress():
     assert calls[-1] == (len(imgs), len(imgs))
 
 
+def test_remove_mask_background_stack_parallel():
+    imgs = np.array(
+        [
+            [[10, 20], [30, 40]],
+            [[50, 60], [70, 80]],
+        ],
+        dtype=np.uint8,
+    )
+    masks = np.ones_like(imgs, dtype=np.uint8)
+
+    single = remove_mask_background_stack(imgs, masks, 50)
+    parallel = remove_mask_background_stack(imgs, masks, 50, workers=2)
+
+    assert np.array_equal(single, parallel)
+
+
 def test_remove_mask_background_progress():
     img = np.array([[10, 20], [30, 40]], dtype=np.uint8)
     mask = np.ones_like(img, dtype=np.uint8)
