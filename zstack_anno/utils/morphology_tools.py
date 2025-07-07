@@ -52,8 +52,23 @@ def _print_progress(
     current: int,
     total: int,
     callback: Callable | None = None,
+    *,
+    line: int | None = None,
 ) -> None:
-    """Print or callback progress information."""
+    """Print or callback progress information.
+
+    Parameters
+    ----------
+    prefix:
+        Text shown before the progress bar.
+    current, total:
+        Current and total iteration counts.
+    callback:
+        Optional callable used instead of printing.
+    line:
+        If provided, update the specified console line to allow multiple
+        progress bars to be shown in parallel.
+    """
 
     if callback is not None:
         callback(current, total)
@@ -62,10 +77,18 @@ def _print_progress(
     bar_len = 20
     filled = int(bar_len * current / float(total)) if total else 0
     bar = "#" * filled + "-" * (bar_len - filled)
-    sys.stdout.write(f"\r{prefix} [{bar}] {current}/{total}")
+    msg = f"{prefix} [{bar}] {current}/{total}"
+
+    if line is not None:
+        sys.stdout.write("\x1b7")  # save cursor
+        sys.stdout.write(f"\x1b[{line}F")  # move up
+        sys.stdout.write("\r" + msg + "\n")
+        sys.stdout.write("\x1b8")  # restore
+    else:
+        sys.stdout.write("\r" + msg)
+        if current == total:
+            sys.stdout.write("\n")
     sys.stdout.flush()
-    if current == total:
-        sys.stdout.write("\n")
 
 
 def _dilate_once(arr: np.ndarray) -> np.ndarray:
@@ -283,6 +306,7 @@ def remove_mask_background_stack(
     *,
     progress: bool = False,
     progress_fn: Callable | None = None,
+    workers: int = 1,
 ) -> np.ndarray:
     """Apply ``remove_mask_background`` on each slice pair of images and masks.
 
@@ -298,17 +322,45 @@ def remove_mask_background_stack(
     progress_fn:
         Optional callback invoked with ``(current, total)`` for progress
         reporting.
+    workers:
+        Number of worker threads to use. Values greater than ``1`` enable
+        parallel processing of slices.
     """
 
-    result = []
     total = len(images)
     if progress:
         _print_progress("BG filter", 0, total, callback=progress_fn)
-    for idx, (img, msk) in enumerate(zip(images, masks), start=1):
-        if progress:
-            _print_progress("BG filter", idx, total, callback=progress_fn)
-        result.append(remove_mask_background(img, msk, percentile))
-    return np.stack(result)
+
+    if workers and workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+
+        results: list[np.ndarray | None] = [None] * total
+        count = 0
+        lock = threading.Lock()
+
+        def task(args: tuple[int, np.ndarray, np.ndarray]) -> None:
+            nonlocal count
+            idx, img, msk = args
+            res = remove_mask_background(img, msk, percentile)
+            results[idx] = res
+            if progress:
+                with lock:
+                    count += 1
+                    _print_progress("BG filter", count, total, callback=progress_fn)
+
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            ex.map(task, [(i, im, mk) for i, (im, mk) in enumerate(zip(images, masks))])
+
+        return np.stack([r for r in results if r is not None])
+
+    else:
+        result = []
+        for idx, (img, msk) in enumerate(zip(images, masks), start=1):
+            if progress:
+                _print_progress("BG filter", idx, total, callback=progress_fn)
+            result.append(remove_mask_background(img, msk, percentile))
+        return np.stack(result)
 
 
 def _gaussian_blur_slice_numpy(slice_: np.ndarray, sigma: float) -> np.ndarray:
