@@ -134,7 +134,7 @@ class ScriptEditor(QDialog):
         },
         "Background Filter": {
             "method": "script_bg_filter",
-            "params": {"diff_pct": 50.0, "hist_pct": 20.0},
+            "params": {"percentile": 10.0},
         },
         "Gaussian Blur": {"method": "script_blur", "params": {"sigma": 1.0}},
         "Clear Blur": {"method": "script_clear_blur", "params": {}},
