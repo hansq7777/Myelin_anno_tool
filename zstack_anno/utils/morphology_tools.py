@@ -9,6 +9,7 @@ try:
     from skimage.morphology import remove_small_objects
     from skimage.morphology import skeletonize
     from skimage.measure import label
+    from skimage.segmentation import flood
 except Exception:  # pragma: no cover - scikit-image may be unavailable
     sk_binary_dilation = None  # type: ignore
     sk_binary_erosion = None  # type: ignore
@@ -16,6 +17,7 @@ except Exception:  # pragma: no cover - scikit-image may be unavailable
     skeletonize = None  # type: ignore
     label = None  # type: ignore
     gaussian = None  # type: ignore
+    flood = None  # type: ignore
 else:
     try:
         from skimage.filters import gaussian
@@ -471,6 +473,72 @@ def intensity_region_grow(
 
     final = label_components(labels > 0)
     return (final > 0).astype(np.uint8)
+
+
+def flood_region_grow(
+    slice_: np.ndarray,
+    mask: np.ndarray,
+    connectivity: int = 1,
+    tolerance: float = 5.0,
+    *,
+    progress: bool = False,
+    progress_fn: Callable | None = None,
+    workers: int = 1,
+) -> np.ndarray:
+    """Grow ``mask`` using ``skimage.segmentation.flood`` for each component."""
+
+    if flood is None:  # pragma: no cover - scikit-image may be unavailable
+        raise RuntimeError("skimage.segmentation.flood is unavailable")
+
+    labels = label_components(mask)
+    unique = np.unique(labels)
+    unique = unique[unique != 0]
+    result = np.zeros_like(mask, dtype=np.uint8)
+
+    def run_one(lv: int) -> np.ndarray | None:
+        region = labels == lv
+        if not np.any(region):
+            return None
+        seed = tuple(np.argwhere(region)[0])
+        return flood(slice_, seed, connectivity=connectivity, tolerance=tolerance)
+
+    total = len(unique)
+    if progress:
+        _print_progress("Flood", 0, total, callback=progress_fn)
+
+    if workers and workers > 1 and total > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+
+        results: list[np.ndarray | None] = [None] * total
+        count = 0
+        lock = threading.Lock()
+
+        def task(args: tuple[int, int]) -> None:
+            nonlocal count
+            idx, lv = args
+            res = run_one(lv)
+            results[idx] = res
+            if progress:
+                with lock:
+                    count += 1
+                    _print_progress("Flood", count, total, callback=progress_fn)
+
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            ex.map(task, [(i, lv) for i, lv in enumerate(unique)])
+
+        for res in results:
+            if res is not None:
+                result[res] = 1
+    else:
+        for idx, lv in enumerate(unique, start=1):
+            if progress:
+                _print_progress("Flood", idx, total, callback=progress_fn)
+            res = run_one(lv)
+            if res is not None:
+                result[res] = 1
+
+    return result
 
 
 def _skeletonize_numpy(slice_: np.ndarray) -> np.ndarray:

@@ -558,6 +558,25 @@ class MainController(QMainWindow):
         self.model.set_mask(grown)
         self._update_view()
 
+    def script_flood_grow(
+        self, connectivity: int = 1, tolerance: float = 5.0, workers: int = 1
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("flood_grow")
+        img = self.model.get_current()
+        cur = self.model.get_mask()
+        grown = morphology_tools.flood_region_grow(
+            img.astype(float),
+            cur,
+            connectivity=connectivity,
+            tolerance=tolerance,
+            workers=workers,
+            progress=True,
+        )
+        self.model.set_mask(grown)
+        self._update_view()
+
     def script_blur(self, sigma: float = 1.0) -> None:
         if self.model.data is None:
             return
@@ -785,7 +804,8 @@ class MainController(QMainWindow):
             "  Opacity - mask overlay transparency\n"
             "  Clear Blur - restore the image without blur\n"
             "  Seed % + Seed - create mask seeds above intensity percentile\n"
-            "  Diff %/Hist % + Int Grow - expand mask using intensity difference and optional histogram cutoff\n\n"
+            "  Diff %/Hist % + Int Grow - expand mask using intensity difference and optional histogram cutoff\n"
+            "  Conn/Tol + Flood Grow - expand mask using flood fill with connectivity and tolerance\n\n"
             "Menus provide the same actions as the toolbar.\n"
             "Zoom with mouse wheel when over the image.\n"
             "Use Tools -> Script Editor to automate sequences of these actions"
