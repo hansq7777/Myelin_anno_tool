@@ -15,6 +15,7 @@ from zstack_anno.utils.morphology_tools import (
     remove_small,
     histogram_stretch_stack,
     remove_mask_background,
+    remove_mask_background_stack,
     sample_seeds,
     intensity_region_grow,
 )
@@ -119,6 +120,30 @@ def test_intensity_region_grow():
     grown = intensity_region_grow(img, mask, diff_percent=50, hist_percent=20)
     assert grown.sum() > 1
     assert grown[0, 0] == 0
+
+
+def test_remove_mask_background_stack_progress():
+    imgs = np.array([
+        [[10, 20], [30, 40]],
+        [[50, 60], [70, 80]],
+    ], dtype=np.uint8)
+    masks = np.ones_like(imgs, dtype=np.uint8)
+    calls: list[tuple[int, int]] = []
+
+    def cb(cur: int, total: int) -> None:
+        calls.append((cur, total))
+
+    result = remove_mask_background_stack(
+        imgs,
+        masks,
+        50,
+        progress=True,
+        progress_fn=cb,
+    )
+    assert result.shape == imgs.shape
+    # first call should be (0,total) and last call (total,total)
+    assert calls[0] == (0, len(imgs))
+    assert calls[-1] == (len(imgs), len(imgs))
 
 
 

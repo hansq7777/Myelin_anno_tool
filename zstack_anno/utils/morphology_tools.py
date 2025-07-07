@@ -225,11 +225,36 @@ def remove_mask_background(
 
 
 def remove_mask_background_stack(
-    images: np.ndarray, masks: np.ndarray, percentile: float
+    images: np.ndarray,
+    masks: np.ndarray,
+    percentile: float,
+    *,
+    progress: bool = False,
+    progress_fn: Callable | None = None,
 ) -> np.ndarray:
-    """Apply ``remove_mask_background`` on each slice pair of images and masks."""
+    """Apply ``remove_mask_background`` on each slice pair of images and masks.
+
+    Parameters
+    ----------
+    images, masks:
+        Stack of images and corresponding masks.
+    percentile:
+        Pixels strictly below this percentile within each connected component
+        are removed.
+    progress:
+        If ``True``, display a simple progress bar.
+    progress_fn:
+        Optional callback invoked with ``(current, total)`` for progress
+        reporting.
+    """
+
     result = []
-    for img, msk in zip(images, masks):
+    total = len(images)
+    if progress:
+        _print_progress("BG filter", 0, total, callback=progress_fn)
+    for idx, (img, msk) in enumerate(zip(images, masks), start=1):
+        if progress:
+            _print_progress("BG filter", idx, total, callback=progress_fn)
         result.append(remove_mask_background(img, msk, percentile))
     return np.stack(result)
 
