@@ -220,8 +220,10 @@ class MainController(QMainWindow):
         tool_menu = self.menuBar().addMenu("Tools")
         script_act = tool_menu.addAction("Script Editor")
         script_act.triggered.connect(self._open_script_editor)
-        # Support Command+E and Option+E on macOS, and Alt+E elsewhere
-        script_act.setShortcuts(["Alt+E", "Meta+E"])
+        # Support Command+E and Option+E on macOS, and Alt+E elsewhere.
+        # Ctrl+E is mapped to Command+E automatically on macOS, so include
+        # it alongside Alt/Meta for cross-platform compatibility.
+        script_act.setShortcuts(["Alt+E", "Ctrl+E", "Meta+E"])
 
         help_menu = self.menuBar().addMenu("Help")
         help_act = help_menu.addAction("Shortcuts && Features")
@@ -443,7 +445,8 @@ class MainController(QMainWindow):
             self.model.reset_contrast()
         else:
             self.model.histogram_stretch(pct)
-        self._update_view(reset_view=True)
+        # keep current zoom level when updating the view after stretch
+        self._update_view()
 
     def _apply_blur(self) -> None:
         if self.model.data is None:
@@ -455,7 +458,8 @@ class MainController(QMainWindow):
 
     def _toggle_original(self) -> None:
         self.model.toggle_show_original()
-        self._update_view(reset_view=True)
+        # keep current zoom level when toggling original view
+        self._update_view()
 
     def _change_opacity(self) -> None:
         value = self.opacity_combo.currentData()
