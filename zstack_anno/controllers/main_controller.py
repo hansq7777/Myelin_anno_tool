@@ -14,7 +14,8 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QMessageBox,
 )
-from PyQt5.QtCore import Qt, QEvent, QPoint
+from PyQt5.QtCore import Qt, QEvent, QPoint, QThread, pyqtSignal
+import threading
 import sys
 import os
 import numpy as np
@@ -23,6 +24,29 @@ from ..views.canvas import SliceCanvas
 from ..views.script_editor import ScriptEditor
 from ..utils import morphology_tools
 from ..utils.dialogs import question_with_shortcuts
+
+
+class IntGrowThread(QThread):
+    finished = pyqtSignal(np.ndarray)
+    cancelled = pyqtSignal()
+
+    def __init__(self, img: np.ndarray, mask: np.ndarray, diff: float, hist: float | None, event: threading.Event) -> None:
+        super().__init__()
+        self.img = img
+        self.mask = mask
+        self.diff = diff
+        self.hist = hist
+        self.event = event
+
+    def run(self) -> None:
+        result = morphology_tools.intensity_region_grow(
+            self.img, self.mask, self.diff, self.hist,
+            progress=True, cancel_event=self.event
+        )
+        if self.event.is_set():
+            self.cancelled.emit()
+        else:
+            self.finished.emit(result)
 
 class MainController(QMainWindow):
     def __init__(self):
@@ -40,6 +64,8 @@ class MainController(QMainWindow):
         self._last_pos = None
         self._temp_mask = None
         self._delete_start = None
+        self.cancel_event = threading.Event()
+        self.grow_thread: IntGrowThread | None = None
         self._build_layout()
         self._create_menu()
         self.statusBar().showMessage("Ready")
@@ -149,11 +175,15 @@ class MainController(QMainWindow):
         self.int_hist_edit.setPlaceholderText("Hist %")
         self.int_grow_btn = QPushButton("Int Grow")
         self.int_grow_btn.clicked.connect(self._grow_intensity)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self._cancel_operation)
+        self.cancel_btn.setEnabled(False)
         grow_layout.addWidget(self.seed_thresh_edit)
         grow_layout.addWidget(self.seed_btn)
         grow_layout.addWidget(self.int_diff_edit)
         grow_layout.addWidget(self.int_hist_edit)
         grow_layout.addWidget(self.int_grow_btn)
+        grow_layout.addWidget(self.cancel_btn)
         ctrl.addLayout(grow_layout)
 
         self.info_label = QLabel("")
@@ -493,6 +523,8 @@ class MainController(QMainWindow):
     def _grow_intensity(self) -> None:
         if not self._ensure_masks():
             return
+        if self.grow_thread is not None and self.grow_thread.isRunning():
+            return
         try:
             diff_pct = float(self.int_diff_edit.text())
         except ValueError:
@@ -504,11 +536,31 @@ class MainController(QMainWindow):
         self._push_undo("int_grow")
         img = self.model.get_current()
         cur = self.model.get_mask()
-        grown = morphology_tools.intensity_region_grow(
-            img.astype(float), cur, diff_pct, hist_pct, progress=True
+        self.cancel_event.clear()
+        self.cancel_btn.setEnabled(True)
+        self.int_grow_btn.setEnabled(False)
+        self.grow_thread = IntGrowThread(
+            img.astype(float), cur, diff_pct, hist_pct, self.cancel_event
         )
-        self.model.set_mask(grown)
+        self.grow_thread.finished.connect(self._int_grow_finished)
+        self.grow_thread.cancelled.connect(self._int_grow_cancelled)
+        self.grow_thread.start()
+
+    def _int_grow_finished(self, result: np.ndarray) -> None:
+        self.model.set_mask(result)
         self._update_view()
+        self.int_grow_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.grow_thread = None
+
+    def _int_grow_cancelled(self) -> None:
+        self.int_grow_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.statusBar().showMessage("Operation cancelled")
+        self.grow_thread = None
+
+    def _cancel_operation(self) -> None:
+        self.cancel_event.set()
 
     # --------- scriptable wrappers ---------
     def script_dilate(self, iterations: int = 1) -> None:

@@ -1,6 +1,7 @@
 import importlib
 import sys
 from pathlib import Path
+import threading
 import pytest
 np = importlib.import_module('numpy') if importlib.util.find_spec('numpy') else None
 if np is None:
@@ -139,6 +140,44 @@ def test_flood_region_grow():
     grown = flood_region_grow(img, mask, connectivity=1, tolerance=30)
     assert grown.sum() > 1
     assert grown[0, 0] == 0
+
+
+def test_intensity_region_grow_cancel():
+    img = np.array(
+        [
+            [10, 10, 10, 10, 10],
+            [10, 50, 50, 50, 10],
+            [10, 50, 80, 50, 10],
+            [10, 50, 50, 50, 10],
+            [10, 10, 10, 10, 10],
+        ],
+        dtype=float,
+    )
+    mask = np.zeros_like(img, dtype=np.uint8)
+    mask[2, 2] = 1
+    event = threading.Event()
+    event.set()
+    grown = intensity_region_grow(img, mask, cancel_event=event)
+    assert np.array_equal(grown, mask)
+
+
+def test_flood_region_grow_cancel():
+    img = np.array(
+        [
+            [10, 10, 10, 10, 10],
+            [10, 50, 50, 50, 10],
+            [10, 50, 80, 50, 10],
+            [10, 50, 50, 50, 10],
+            [10, 10, 10, 10, 10],
+        ],
+        dtype=float,
+    )
+    mask = np.zeros_like(img, dtype=np.uint8)
+    mask[2, 2] = 1
+    event = threading.Event()
+    event.set()
+    grown = flood_region_grow(img, mask, cancel_event=event)
+    assert np.array_equal(grown, mask)
 
 
 def test_remove_mask_background_stack_progress():
