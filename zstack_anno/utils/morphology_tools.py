@@ -25,9 +25,13 @@ else:
 try:
     from scipy.ndimage import binary_dilation as nd_binary_dilation
     from scipy.ndimage import binary_erosion as nd_binary_erosion
+    from scipy.ndimage import label as nd_label
+    from scipy.ndimage import labeled_comprehension
 except Exception:  # pragma: no cover - scipy may be unavailable
     nd_binary_dilation = None  # type: ignore
     nd_binary_erosion = None  # type: ignore
+    nd_label = None  # type: ignore
+    labeled_comprehension = None  # type: ignore
 
 try:
     from scipy.ndimage import gaussian_filter  # type: ignore
@@ -229,19 +233,46 @@ def remove_mask_background(
     if values.size == 0:
         return mask.copy()
 
-    labels = label_components(mask)
-    result = mask.copy()
-    total = labels.max()
-    if progress:
-        _print_progress("BG filter", 0, total, callback=progress_fn)
-    for idx, lbl in enumerate(range(1, total + 1), start=1):
+    if nd_label is None or labeled_comprehension is None:
+        labels = label_components(mask)
+        result = mask.copy()
+        total = labels.max()
         if progress:
-            _print_progress("BG filter", idx, total, callback=progress_fn)
-        region = labels == lbl
-        if not np.any(region):
-            continue
-        thresh = np.percentile(image[region], percentile)
-        result[region & (image < thresh)] = 0
+            _print_progress("BG filter", 0, total, callback=progress_fn)
+        for idx, lbl in enumerate(range(1, total + 1), start=1):
+            if progress:
+                _print_progress("BG filter", idx, total, callback=progress_fn)
+            region = labels == lbl
+            if not np.any(region):
+                continue
+            thresh = np.percentile(image[region], percentile)
+            result[region & (image < thresh)] = 0
+        return result
+
+    labels, num = nd_label(mask > 0)
+    if num == 0:
+        return mask.copy()
+    if progress:
+        _print_progress("BG filter", 0, num, callback=progress_fn)
+
+    indices = np.arange(1, num + 1)
+    thresholds = labeled_comprehension(
+        image,
+        labels,
+        indices,
+        lambda x: np.percentile(x, percentile),
+        float,
+        0,
+    )
+    label_thresholds = np.zeros(num + 1, dtype=float)
+    label_thresholds[1:] = thresholds
+    threshold_map = label_thresholds[labels]
+
+    result = mask.copy()
+    result[(labels > 0) & (image < threshold_map)] = 0
+
+    if progress:
+        _print_progress("BG filter", num, num, callback=progress_fn)
     return result
 
 
