@@ -287,24 +287,28 @@ def _histogram_percentile(values: np.ndarray, percentile: float) -> float:
 def remove_mask_background(
     image: np.ndarray,
     mask: np.ndarray,
-    percentile: float,
+    diff_percent: float,
+    hist_percent: float | None = None,
     *,
     progress: bool = False,
     progress_fn: Callable | None = None,
 ) -> np.ndarray:
-    """Remove lowest intensity pixels within ``mask`` based on percentile.
+    """Expand ``mask`` using mean intensity and optional histogram threshold.
 
-    The threshold is computed independently for each connected component in the
-    mask. Pixels are removed from a component if their value is strictly below
-    the percentile of that component's intensities. If ``mask`` contains no
-    pixels, a copy of ``mask`` is returned unchanged.
+    Neighboring pixels are added if their value is greater than the current
+    seed pixel or if the value is within ``diff_percent`` of the mean intensity
+    of the original mask region. Pixels below ``hist_percent`` of the slice
+    histogram are ignored when ``hist_percent`` is provided. If ``mask``
+    contains no pixels, a copy is returned unchanged.
 
     Parameters
     ----------
     image, mask:
         Input slice and corresponding mask.
-    percentile:
-        Intensity percentile threshold.
+    diff_percent:
+        Allowed percentage difference from the mean intensity.
+    hist_percent:
+        Optional histogram cutoff for candidate pixels.
     progress:
         If ``True``, report progress for each connected component.
     progress_fn:
@@ -316,29 +320,58 @@ def remove_mask_background(
         return mask.copy()
 
     labels = label_components(mask)
-    result = mask.copy()
-    total = labels.max()
+    unique = np.unique(labels)
+    unique = unique[unique != 0]
+    h, w = mask.shape
+    hist_thresh = None
+    if hist_percent is not None:
+        hist_thresh = float(np.percentile(image, hist_percent))
+
+    total = len(unique)
     if progress:
         _print_progress("BG filter", 0, total, callback=progress_fn)
 
-    for idx, lbl in enumerate(range(1, total + 1), start=1):
+    for idx, lv in enumerate(unique, start=1):
         if progress:
             _print_progress("BG filter", idx, total, callback=progress_fn)
-        region = labels == lbl
+        region = labels == lv
         if not np.any(region):
             continue
-        thresh = _histogram_percentile(image[region], percentile)
-        result[region & (image < thresh)] = 0
+        mean_intensity = float(image[region].astype(float).mean())
+        diff_thresh = mean_intensity * (diff_percent / 100.0)
+        q = [tuple(pt) for pt in zip(*np.nonzero(region))]
+        visited = set(q)
+        while q:
+            y, x = q.pop()
+            seed_val = float(image[y, x])
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    if dy == 0 and dx == 0:
+                        continue
+                    ny, nx = y + dy, x + dx
+                    if not (0 <= ny < h and 0 <= nx < w):
+                        continue
+                    if labels[ny, nx] != 0 or (ny, nx) in visited:
+                        continue
+                    val = float(image[ny, nx])
+                    if hist_thresh is not None and val < hist_thresh:
+                        continue
+                    if val >= seed_val or val >= mean_intensity - diff_thresh:
+                        labels[ny, nx] = lv
+                        visited.add((ny, nx))
+                        q.append((ny, nx))
 
     if progress:
         _print_progress("BG filter", total, total, callback=progress_fn)
-    return result
+    final = label_components(labels > 0)
+    return (final > 0).astype(np.uint8)
 
 
 def remove_mask_background_stack(
     images: np.ndarray,
     masks: np.ndarray,
-    percentile: float,
+    diff_percent: float,
+    hist_percent: float | None = None,
     *,
     progress: bool = False,
     progress_fn: Callable | None = None,
@@ -350,9 +383,10 @@ def remove_mask_background_stack(
     ----------
     images, masks:
         Stack of images and corresponding masks.
-    percentile:
-        Pixels strictly below this percentile within each connected component
-        are removed.
+    diff_percent:
+        Allowed percentage difference from the mean intensity.
+    hist_percent:
+        Optional histogram cutoff for candidate pixels.
     progress:
         If ``True``, display a simple progress bar.
     progress_fn:
@@ -378,7 +412,7 @@ def remove_mask_background_stack(
         def task(args: tuple[int, np.ndarray, np.ndarray]) -> None:
             nonlocal count
             idx, img, msk = args
-            res = remove_mask_background(img, msk, percentile)
+            res = remove_mask_background(img, msk, diff_percent, hist_percent)
             results[idx] = res
             if progress:
                 with lock:
@@ -395,7 +429,7 @@ def remove_mask_background_stack(
         for idx, (img, msk) in enumerate(zip(images, masks), start=1):
             if progress:
                 _print_progress("BG filter", idx, total, callback=progress_fn)
-            result.append(remove_mask_background(img, msk, percentile))
+            result.append(remove_mask_background(img, msk, diff_percent, hist_percent))
         return np.stack(result)
 
 

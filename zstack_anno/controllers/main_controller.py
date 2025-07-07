@@ -125,11 +125,14 @@ class MainController(QMainWindow):
 
 
         bg_layout = QVBoxLayout()
-        self.bg_percentile_edit = QLineEdit()
-        self.bg_percentile_edit.setPlaceholderText("BG %")
+        self.bg_diff_edit = QLineEdit()
+        self.bg_diff_edit.setPlaceholderText("Diff %")
+        self.bg_hist_edit = QLineEdit()
+        self.bg_hist_edit.setPlaceholderText("Hist %")
         self.bg_filter_button = QPushButton("BG Filter")
         self.bg_filter_button.clicked.connect(self._apply_bg_filter)
-        bg_layout.addWidget(self.bg_percentile_edit)
+        bg_layout.addWidget(self.bg_diff_edit)
+        bg_layout.addWidget(self.bg_hist_edit)
         bg_layout.addWidget(self.bg_filter_button)
         ctrl.addLayout(bg_layout)
 
@@ -457,11 +460,15 @@ class MainController(QMainWindow):
         if not self._ensure_masks():
             return
         try:
-            pct = float(self.bg_percentile_edit.text())
+            diff_pct = float(self.bg_diff_edit.text())
         except ValueError:
-            pct = 0.0
+            diff_pct = 20.0
+        try:
+            hist_pct = float(self.bg_hist_edit.text())
+        except ValueError:
+            hist_pct = None
         self._push_undo("bg_filter")
-        self.model.remove_background(pct, progress=True)
+        self.model.remove_background(diff_pct, hist_pct, progress=True)
         self._update_view()
 
     def _apply_stretch(self) -> None:
@@ -643,12 +650,14 @@ class MainController(QMainWindow):
         self.model.remove_gaussian_blur()
         self._update_view()
 
-    def script_bg_filter(self, percentile: float = 0.0) -> None:
-        """Remove low intensity pixels from the mask using percentile."""
+    def script_bg_filter(
+        self, diff_pct: float = 20.0, hist_pct: float | None = None
+    ) -> None:
+        """Grow the mask using intensity similarity."""
         if not self._ensure_masks():
             return
         self._push_undo("bg_filter")
-        self.model.remove_background(percentile, progress=True)
+        self.model.remove_background(diff_pct, hist_pct, progress=True)
         self._update_view()
 
     def script_next_slice(self) -> None:
@@ -853,7 +862,7 @@ class MainController(QMainWindow):
             "  Strength - number of iterations for Dilate/Erode (1-10)\n"
             "  Filter < - remove components smaller than value in Filter spin\n"
             "  Filter spin - minimum pixel count for the small component filter\n"
-            "  BG % + BG Filter - percentile threshold to subtract low intensity background\n"
+            "  Diff %/Hist % + BG Filter - grow mask using mean intensity and optional histogram cutoff\n"
             "  Stretch % + Stretch - histogram stretch (0 resets to original)\n"
             "  Blur + Blur value - apply Gaussian blur with given sigma\n"
             "  Show Original - toggle display of the unblurred image\n"
