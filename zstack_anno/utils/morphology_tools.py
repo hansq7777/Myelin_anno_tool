@@ -250,6 +250,40 @@ def histogram_stretch_stack(stack: np.ndarray, percentile: float) -> np.ndarray:
     return np.stack([histogram_stretch(s, percentile) for s in stack])
 
 
+def _histogram_percentile(values: np.ndarray, percentile: float) -> float:
+    """Compute percentile using cumulative histogram.
+
+    Parameters
+    ----------
+    values:
+        Intensity values from which to compute the percentile.
+    percentile:
+        Percentile in ``[0, 100]``.
+
+    Returns
+    -------
+    float
+        Threshold intensity corresponding to the percentile.
+    """
+
+    if values.size == 0:
+        return 0.0
+
+    if percentile <= 0:
+        return float(values.min())
+    if percentile >= 100:
+        return float(values.max())
+
+    vmin, vmax = float(values.min()), float(values.max())
+    # use fixed number of bins for stability
+    hist, edges = np.histogram(values, bins=256, range=(vmin - 0.5, vmax + 0.5))
+    cum = np.cumsum(hist)
+    cutoff = (percentile / 100.0) * values.size
+    idx = int(np.searchsorted(cum, cutoff, side="right"))
+    idx = min(max(idx, 0), len(edges) - 2)
+    return float(edges[idx])
+
+
 def remove_mask_background(
     image: np.ndarray,
     mask: np.ndarray,
@@ -281,46 +315,23 @@ def remove_mask_background(
     if values.size == 0:
         return mask.copy()
 
-    if nd_label is None or labeled_comprehension is None:
-        labels = label_components(mask)
-        result = mask.copy()
-        total = labels.max()
-        if progress:
-            _print_progress("BG filter", 0, total, callback=progress_fn)
-        for idx, lbl in enumerate(range(1, total + 1), start=1):
-            if progress:
-                _print_progress("BG filter", idx, total, callback=progress_fn)
-            region = labels == lbl
-            if not np.any(region):
-                continue
-            thresh = np.percentile(image[region], percentile)
-            result[region & (image < thresh)] = 0
-        return result
-
-    labels, num = nd_label(mask > 0)
-    if num == 0:
-        return mask.copy()
-    if progress:
-        _print_progress("BG filter", 0, num, callback=progress_fn)
-
-    indices = np.arange(1, num + 1)
-    thresholds = labeled_comprehension(
-        image,
-        labels,
-        indices,
-        lambda x: np.percentile(x, percentile),
-        float,
-        0,
-    )
-    label_thresholds = np.zeros(num + 1, dtype=float)
-    label_thresholds[1:] = thresholds
-    threshold_map = label_thresholds[labels]
-
+    labels = label_components(mask)
     result = mask.copy()
-    result[(labels > 0) & (image < threshold_map)] = 0
+    total = labels.max()
+    if progress:
+        _print_progress("BG filter", 0, total, callback=progress_fn)
+
+    for idx, lbl in enumerate(range(1, total + 1), start=1):
+        if progress:
+            _print_progress("BG filter", idx, total, callback=progress_fn)
+        region = labels == lbl
+        if not np.any(region):
+            continue
+        thresh = _histogram_percentile(image[region], percentile)
+        result[region & (image < thresh)] = 0
 
     if progress:
-        _print_progress("BG filter", num, num, callback=progress_fn)
+        _print_progress("BG filter", total, total, callback=progress_fn)
     return result
 
 
