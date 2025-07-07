@@ -220,6 +220,8 @@ class MainController(QMainWindow):
         tool_menu = self.menuBar().addMenu("Tools")
         script_act = tool_menu.addAction("Script Editor")
         script_act.triggered.connect(self._open_script_editor)
+        # Support Command+E and Option+E on macOS, and Alt+E elsewhere
+        script_act.setShortcuts(["Alt+E", "Meta+E"])
 
         help_menu = self.menuBar().addMenu("Help")
         help_act = help_menu.addAction("Shortcuts && Features")

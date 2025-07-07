@@ -360,10 +360,6 @@ class ScriptEditor(QDialog):
 
     def run_stack(self) -> None:
         """Entry point for running the script on one or more stacks."""
-        if self.controller.model.data is None:
-            QMessageBox.warning(self, "No Image", "Please load an image first")
-            return
-
         mode = QMessageBox(self)
         mode.setWindowTitle("Run Stack(s)")
         mode.setText("Run on current stack or multiple stacks?")
@@ -392,6 +388,19 @@ class ScriptEditor(QDialog):
 
     def _run_single_stack(self) -> None:
         """Run the script on the currently loaded stack."""
+        if self.controller.model.data is None:
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select Stack",
+                "",
+                "TIFF Images (*.tif *.tiff *.ome.tif)",
+            )
+            if not path:
+                return
+            self.controller.model.load(path)
+            self.controller.slider.setRange(0, self.controller.model.n_slices - 1)
+            self.controller._update_view(reset_view=True)
+
         msg = QMessageBox(self)
         msg.setWindowTitle("Run Stack")
         msg.setText("Select run mode")
