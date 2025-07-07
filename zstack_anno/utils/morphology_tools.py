@@ -457,12 +457,16 @@ def intensity_region_grow(
     hist_percent: float | None = None,
     progress: bool = False,
     progress_fn: Callable | None = None,
+    cancel_event: 'threading.Event | None' = None,
 ) -> np.ndarray:
     """Grow ``mask`` based on intensity similarity.
 
     Pixels are added if their intensity is within ``diff_percent`` of the
     seed region mean. If ``hist_percent`` is provided, pixels below this
     percentile of the slice histogram are ignored.
+
+    If ``cancel_event`` is provided and set during execution, the original
+    ``mask`` is returned unchanged.
     """
 
     labels = label_components(mask)
@@ -477,6 +481,8 @@ def intensity_region_grow(
     if progress:
         _print_progress("Int grow", 0, total, callback=progress_fn)
     for idx, lv in enumerate(unique, start=1):
+        if cancel_event is not None and cancel_event.is_set():
+            return mask
         if progress:
             _print_progress("Int grow", idx, total, callback=progress_fn)
         region = labels == lv
@@ -487,6 +493,8 @@ def intensity_region_grow(
         q = [tuple(pt) for pt in zip(*np.nonzero(region))]
         visited = set(q)
         while q:
+            if cancel_event is not None and cancel_event.is_set():
+                return mask
             y, x = q.pop()
             for dy in (-1, 0, 1):
                 for dx in (-1, 0, 1):
@@ -518,8 +526,13 @@ def flood_region_grow(
     progress: bool = False,
     progress_fn: Callable | None = None,
     workers: int = 1,
+    cancel_event: 'threading.Event | None' = None,
 ) -> np.ndarray:
-    """Grow ``mask`` using ``skimage.segmentation.flood`` for each component."""
+    """Grow ``mask`` using ``skimage.segmentation.flood`` for each component.
+
+    If ``cancel_event`` is provided and set, the partially grown result so far
+    is returned.
+    """
 
     if flood is None:  # pragma: no cover - scikit-image may be unavailable
         raise RuntimeError("skimage.segmentation.flood is unavailable")
@@ -551,6 +564,8 @@ def flood_region_grow(
         def task(args: tuple[int, int]) -> None:
             nonlocal count
             idx, lv = args
+            if cancel_event is not None and cancel_event.is_set():
+                return
             res = run_one(lv)
             results[idx] = res
             if progress:
@@ -561,11 +576,15 @@ def flood_region_grow(
         with ThreadPoolExecutor(max_workers=workers) as ex:
             ex.map(task, [(i, lv) for i, lv in enumerate(unique)])
 
+        if cancel_event is not None and cancel_event.is_set():
+            return mask
         for res in results:
             if res is not None:
                 result[res] = 1
     else:
         for idx, lv in enumerate(unique, start=1):
+            if cancel_event is not None and cancel_event.is_set():
+                return mask
             if progress:
                 _print_progress("Flood", idx, total, callback=progress_fn)
             res = run_one(lv)
