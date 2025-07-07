@@ -75,11 +75,21 @@ def test_histogram_stretch_stack():
 
 
 def test_remove_mask_background():
-    img = np.array([[10, 20], [30, 40]], dtype=np.uint8)
-    mask = np.ones_like(img, dtype=np.uint8)
-    filtered = remove_mask_background(img, mask, 50)
-    expected = np.array([[0, 0], [1, 1]], dtype=np.uint8)
-    assert np.array_equal(filtered, expected)
+    img = np.array([[10, 20], [30, 40]], dtype=float)
+    mask = np.zeros_like(img, dtype=np.uint8)
+    mask[0, 0] = 1
+    grown = remove_mask_background(img, mask, 50)
+    expected = np.ones_like(mask)
+    assert np.array_equal(grown, expected)
+
+
+def test_remove_mask_background_hist():
+    img = np.array([[10, 20], [30, 80]], dtype=float)
+    mask = np.zeros_like(img, dtype=np.uint8)
+    mask[0, 0] = 1
+    grown = remove_mask_background(img, mask, 50, 90)
+    expected = np.array([[1, 0], [0, 1]], dtype=np.uint8)
+    assert np.array_equal(grown, expected)
 
 
 def test_remove_mask_background_multiple_components():
@@ -97,7 +107,7 @@ def test_remove_mask_background_multiple_components():
         ],
         dtype=np.uint8,
     )
-    filtered = remove_mask_background(img, mask, 50)
+    filtered = remove_mask_background(img.astype(float), mask, 20)
     assert np.array_equal(filtered, mask)
 
 
@@ -195,6 +205,7 @@ def test_remove_mask_background_stack_progress():
         imgs,
         masks,
         50,
+        None,
         progress=True,
         progress_fn=cb,
     )
@@ -232,6 +243,7 @@ def test_remove_mask_background_progress():
         img,
         mask,
         50,
+        None,
         progress=True,
         progress_fn=cb,
     )

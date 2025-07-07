@@ -228,13 +228,14 @@ class ZStackModel:
 
     def remove_background(
         self,
-        percentile: float,
+        diff_percent: float,
+        hist_percent: float | None = None,
         slice_idx: int | None = None,
         *,
         progress: bool = False,
         progress_fn: Callable | None = None,
     ) -> None:
-        """Remove low intensity pixels from the mask on ``slice_idx``."""
+        """Grow the mask on ``slice_idx`` using intensity similarity."""
         if self.data is None or self.masks is None:
             return
         if slice_idx is None:
@@ -244,7 +245,8 @@ class ZStackModel:
         new_mask = remove_mask_background(
             img,
             mask,
-            percentile,
+            diff_percent,
+            hist_percent,
             progress=progress,
             progress_fn=progress_fn,
         )
