@@ -18,6 +18,7 @@ from zstack_anno.utils.morphology_tools import (
     remove_mask_background_stack,
     sample_seeds,
     intensity_region_grow,
+    flood_region_grow,
 )
 
 
@@ -118,6 +119,24 @@ def test_intensity_region_grow():
     mask = np.zeros_like(img, dtype=np.uint8)
     mask[2, 2] = 1
     grown = intensity_region_grow(img, mask, diff_percent=50, hist_percent=20)
+    assert grown.sum() > 1
+    assert grown[0, 0] == 0
+
+
+def test_flood_region_grow():
+    img = np.array(
+        [
+            [10, 10, 10, 10, 10],
+            [10, 50, 50, 50, 10],
+            [10, 50, 80, 50, 10],
+            [10, 50, 50, 50, 10],
+            [10, 10, 10, 10, 10],
+        ],
+        dtype=float,
+    )
+    mask = np.zeros_like(img, dtype=np.uint8)
+    mask[2, 2] = 1
+    grown = flood_region_grow(img, mask, connectivity=1, tolerance=30)
     assert grown.sum() > 1
     assert grown[0, 0] == 0
 

@@ -128,6 +128,10 @@ class ScriptEditor(QDialog):
             "method": "script_int_grow",
             "params": {"diff_pct": 50.0, "hist_pct": 20.0},
         },
+        "Flood Grow": {
+            "method": "script_flood_grow",
+            "params": {"connectivity": 1, "tolerance": 5.0},
+        },
         "Background Filter": {
             "method": "script_bg_filter",
             "params": {"percentile": 10.0},
