@@ -229,7 +229,6 @@ class ZStackModel:
     def remove_background(
         self,
         percentile: float,
-        hist_percent: float | None = None,
         slice_idx: int | None = None,
         *,
         progress: bool = False,
@@ -246,7 +245,6 @@ class ZStackModel:
             img,
             mask,
             percentile,
-            hist_percent,
             progress=progress,
             progress_fn=progress_fn,
         )
