@@ -287,28 +287,29 @@ def _histogram_percentile(values: np.ndarray, percentile: float) -> float:
 def remove_mask_background(
     image: np.ndarray,
     mask: np.ndarray,
-    diff_percent: float,
+    percentile: float,
     hist_percent: float | None = None,
     *,
     progress: bool = False,
     progress_fn: Callable | None = None,
 ) -> np.ndarray:
-    """Expand ``mask`` using mean intensity and optional histogram threshold.
+    """Remove low intensity pixels from ``mask`` using percentile.
 
-    Neighboring pixels are added if their value is greater than the current
-    seed pixel or if the value is within ``diff_percent`` of the mean intensity
-    of the original mask region. Pixels below ``hist_percent`` of the slice
-    histogram are ignored when ``hist_percent`` is provided. If ``mask``
-    contains no pixels, a copy is returned unchanged.
+    For each connected component of ``mask`` a histogram threshold is computed
+    and pixels with values strictly below the ``percentile`` are cleared. When
+    ``hist_percent`` is provided, only pixels above that percentile of the full
+    slice histogram are considered when determining the component threshold. If
+    ``mask`` contains no pixels, a copy is returned unchanged.
 
     Parameters
     ----------
     image, mask:
         Input slice and corresponding mask.
-    diff_percent:
-        Allowed percentage difference from the mean intensity.
+    percentile:
+        Pixels strictly below this percentile within each connected component are
+        removed.
     hist_percent:
-        Optional histogram cutoff for candidate pixels.
+        Optional slice-wide percentile below which pixels are ignored.
     progress:
         If ``True``, report progress for each connected component.
     progress_fn:
@@ -320,57 +321,39 @@ def remove_mask_background(
         return mask.copy()
 
     labels = label_components(mask)
-    unique = np.unique(labels)
-    unique = unique[unique != 0]
-    h, w = mask.shape
+    result = mask.copy()
+    total = labels.max()
+
     hist_thresh = None
     if hist_percent is not None:
         hist_thresh = float(np.percentile(image, hist_percent))
 
-    total = len(unique)
     if progress:
         _print_progress("BG filter", 0, total, callback=progress_fn)
 
-    for idx, lv in enumerate(unique, start=1):
+    for idx, lbl in enumerate(range(1, total + 1), start=1):
         if progress:
             _print_progress("BG filter", idx, total, callback=progress_fn)
-        region = labels == lv
+        region = labels == lbl
         if not np.any(region):
             continue
-        mean_intensity = float(image[region].astype(float).mean())
-        diff_thresh = mean_intensity * (diff_percent / 100.0)
-        q = [tuple(pt) for pt in zip(*np.nonzero(region))]
-        visited = set(q)
-        while q:
-            y, x = q.pop()
-            seed_val = float(image[y, x])
-            for dy in (-1, 0, 1):
-                for dx in (-1, 0, 1):
-                    if dy == 0 and dx == 0:
-                        continue
-                    ny, nx = y + dy, x + dx
-                    if not (0 <= ny < h and 0 <= nx < w):
-                        continue
-                    if labels[ny, nx] != 0 or (ny, nx) in visited:
-                        continue
-                    val = float(image[ny, nx])
-                    if hist_thresh is not None and val < hist_thresh:
-                        continue
-                    if val >= seed_val or val >= mean_intensity - diff_thresh:
-                        labels[ny, nx] = lv
-                        visited.add((ny, nx))
-                        q.append((ny, nx))
+        region_values = image[region]
+        if hist_thresh is not None:
+            region_values = region_values[region_values >= hist_thresh]
+        if region_values.size == 0:
+            continue
+        thresh = _histogram_percentile(region_values, percentile)
+        result[region & (image < thresh)] = 0
 
     if progress:
         _print_progress("BG filter", total, total, callback=progress_fn)
-    final = label_components(labels > 0)
-    return (final > 0).astype(np.uint8)
+    return result
 
 
 def remove_mask_background_stack(
     images: np.ndarray,
     masks: np.ndarray,
-    diff_percent: float,
+    percentile: float,
     hist_percent: float | None = None,
     *,
     progress: bool = False,
@@ -383,10 +366,11 @@ def remove_mask_background_stack(
     ----------
     images, masks:
         Stack of images and corresponding masks.
-    diff_percent:
-        Allowed percentage difference from the mean intensity.
+    percentile:
+        Pixels strictly below this percentile within each connected component are
+        removed.
     hist_percent:
-        Optional histogram cutoff for candidate pixels.
+        Optional slice-wide percentile below which pixels are ignored.
     progress:
         If ``True``, display a simple progress bar.
     progress_fn:
@@ -412,7 +396,7 @@ def remove_mask_background_stack(
         def task(args: tuple[int, np.ndarray, np.ndarray]) -> None:
             nonlocal count
             idx, img, msk = args
-            res = remove_mask_background(img, msk, diff_percent, hist_percent)
+            res = remove_mask_background(img, msk, percentile, hist_percent)
             results[idx] = res
             if progress:
                 with lock:
@@ -429,7 +413,7 @@ def remove_mask_background_stack(
         for idx, (img, msk) in enumerate(zip(images, masks), start=1):
             if progress:
                 _print_progress("BG filter", idx, total, callback=progress_fn)
-            result.append(remove_mask_background(img, msk, diff_percent, hist_percent))
+            result.append(remove_mask_background(img, msk, percentile, hist_percent))
         return np.stack(result)
 
 
@@ -495,9 +479,10 @@ def intensity_region_grow(
 ) -> np.ndarray:
     """Grow ``mask`` based on intensity similarity.
 
-    Pixels are added if their intensity is within ``diff_percent`` of the
-    seed region mean. If ``hist_percent`` is provided, pixels below this
-    percentile of the slice histogram are ignored.
+    Neighboring pixels brighter than the current seed are always added. Pixels
+    that are darker are only added when the intensity difference from the seed
+    is within ``diff_percent`` of the seed value. When ``hist_percent`` is
+    provided, pixels below this percentile of the slice histogram are ignored.
 
     If ``cancel_event`` is provided and set during execution, the original
     ``mask`` is returned unchanged.
@@ -522,14 +507,14 @@ def intensity_region_grow(
         region = labels == lv
         if not np.any(region):
             continue
-        mean_intensity = float(slice_[region].astype(float).mean())
-        diff_thresh = mean_intensity * (diff_percent / 100.0)
         q = [tuple(pt) for pt in zip(*np.nonzero(region))]
         visited = set(q)
         while q:
             if cancel_event is not None and cancel_event.is_set():
                 return mask
             y, x = q.pop()
+            seed_val = float(slice_[y, x])
+            diff_thresh = seed_val * (diff_percent / 100.0)
             for dy in (-1, 0, 1):
                 for dx in (-1, 0, 1):
                     if dy == 0 and dx == 0:
@@ -542,7 +527,7 @@ def intensity_region_grow(
                     val = float(slice_[ny, nx])
                     if thresh is not None and val < thresh:
                         continue
-                    if abs(val - mean_intensity) <= diff_thresh:
+                    if val >= seed_val or (seed_val - val) <= diff_thresh:
                         labels[ny, nx] = lv
                         visited.add((ny, nx))
                         q.append((ny, nx))
