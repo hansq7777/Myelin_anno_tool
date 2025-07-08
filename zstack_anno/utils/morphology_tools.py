@@ -463,10 +463,10 @@ def intensity_region_grow(
 ) -> np.ndarray:
     """Grow ``mask`` based on intensity similarity.
 
-    Neighboring pixels brighter than the current seed are always added. Pixels
-    that are darker are only added when the intensity difference from the seed
-    is within ``diff_percent`` of the seed value. When ``hist_percent`` is
-    provided, pixels below this percentile of the slice histogram are ignored.
+    Pixels are added to the region when their intensity is within
+    ``diff_percent`` of the current seed pixel.  When ``hist_percent`` is
+    provided, a global threshold is computed from the slice histogram and
+    pixels below this value are ignored completely.
 
     If ``cancel_event`` is provided and set during execution, the original
     ``mask`` is returned unchanged.
@@ -493,6 +493,8 @@ def intensity_region_grow(
             continue
         q = [tuple(pt) for pt in zip(*np.nonzero(region))]
         visited = set(q)
+        processed = 0
+        region_total = int(region.sum())
         while q:
             if cancel_event is not None and cancel_event.is_set():
                 return mask
@@ -511,11 +513,16 @@ def intensity_region_grow(
                     val = float(slice_[ny, nx])
                     if thresh is not None and val < thresh:
                         continue
-                    if val >= seed_val or (seed_val - val) <= diff_thresh:
+                    if abs(val - seed_val) <= diff_thresh:
                         labels[ny, nx] = lv
                         visited.add((ny, nx))
                         q.append((ny, nx))
-
+            processed += 1
+            if progress and processed % 5000 == 0:
+                _print_progress(
+                    f"Int grow {idx}/{total}", processed, region_total, callback=progress_fn
+                )
+        
     final = label_components(labels > 0)
     return (final > 0).astype(np.uint8)
 
