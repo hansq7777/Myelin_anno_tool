@@ -127,9 +127,12 @@ class MainController(QMainWindow):
         bg_layout = QVBoxLayout()
         self.bg_percentile_edit = QLineEdit()
         self.bg_percentile_edit.setPlaceholderText("BG %")
+        self.bg_bins_edit = QLineEdit()
+        self.bg_bins_edit.setPlaceholderText("Bins")
         self.bg_filter_button = QPushButton("BG Filter")
         self.bg_filter_button.clicked.connect(self._apply_bg_filter)
         bg_layout.addWidget(self.bg_percentile_edit)
+        bg_layout.addWidget(self.bg_bins_edit)
         bg_layout.addWidget(self.bg_filter_button)
         ctrl.addLayout(bg_layout)
 
@@ -460,8 +463,12 @@ class MainController(QMainWindow):
             pct = float(self.bg_percentile_edit.text())
         except ValueError:
             pct = 0.0
+        try:
+            bins = int(self.bg_bins_edit.text())
+        except ValueError:
+            bins = 0
         self._push_undo("bg_filter")
-        self.model.remove_background(pct, progress=True)
+        self.model.remove_background(pct, bins, progress=True)
         self._update_view()
 
     def _apply_stretch(self) -> None:
@@ -643,12 +650,12 @@ class MainController(QMainWindow):
         self.model.remove_gaussian_blur()
         self._update_view()
 
-    def script_bg_filter(self, percentile: float = 0.0) -> None:
+    def script_bg_filter(self, percentile: float = 0.0, bins: int = 0) -> None:
         """Remove low intensity pixels from the mask using percentile."""
         if not self._ensure_masks():
             return
         self._push_undo("bg_filter")
-        self.model.remove_background(percentile, progress=True)
+        self.model.remove_background(percentile, bins, progress=True)
         self._update_view()
 
     def script_next_slice(self) -> None:
@@ -853,7 +860,7 @@ class MainController(QMainWindow):
             "  Strength - number of iterations for Dilate/Erode (1-10)\n"
             "  Filter < - remove components smaller than value in Filter spin\n"
             "  Filter spin - minimum pixel count for the small component filter\n"
-            "  Diff %/Hist % + BG Filter - grow mask using mean intensity and optional histogram cutoff\n"
+            "  BG %/Bins + BG Filter - remove low intensity pixels using percentile and histogram bins\n"
             "  Stretch % + Stretch - histogram stretch (0 resets to original)\n"
             "  Blur + Blur value - apply Gaussian blur with given sigma\n"
             "  Show Original - toggle display of the unblurred image\n"

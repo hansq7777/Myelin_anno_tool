@@ -256,6 +256,7 @@ def remove_mask_background(
     image: np.ndarray,
     mask: np.ndarray,
     percentile: float,
+    global_thresh: float | None = None,
     *,
     progress: bool = False,
     progress_fn: Callable | None = None,
@@ -274,6 +275,9 @@ def remove_mask_background(
     percentile:
         Pixels strictly below this percentile within each connected component are
         removed.
+    global_thresh:
+        Optional intensity threshold computed from the stack histogram. Pixels
+        below this value are removed before applying the percentile filter.
     progress:
         If ``True``, report progress for each connected component.
     progress_fn:
@@ -284,9 +288,15 @@ def remove_mask_background(
     if values.size == 0:
         return mask.copy()
 
+    work_mask = mask.copy()
+    if global_thresh is not None:
+        work_mask[(work_mask > 0) & (image < global_thresh)] = 0
+        if not np.any(work_mask):
+            return work_mask
+
     if nd_label is None or labeled_comprehension is None:
-        labels = label_components(mask)
-        result = mask.copy()
+        labels = label_components(work_mask)
+        result = work_mask.copy()
         total = labels.max()
         if progress:
             _print_progress("BG filter", 0, total, callback=progress_fn)
@@ -300,9 +310,9 @@ def remove_mask_background(
             result[region & (image < thresh)] = 0
         return result
 
-    labels, num = nd_label(mask > 0)
+    labels, num = nd_label(work_mask > 0)
     if num == 0:
-        return mask.copy()
+        return work_mask.copy()
     if progress:
         _print_progress("BG filter", 0, num, callback=progress_fn)
 
@@ -319,7 +329,7 @@ def remove_mask_background(
     label_thresholds[1:] = thresholds
     threshold_map = label_thresholds[labels]
 
-    result = mask.copy()
+    result = work_mask.copy()
     result[(labels > 0) & (image < threshold_map)] = 0
 
     if progress:
