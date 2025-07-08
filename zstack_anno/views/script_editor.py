@@ -402,7 +402,11 @@ class ScriptEditor(QDialog):
             if not path:
                 return
             self.controller.model.load(path)
-            self.controller.slider.setRange(0, self.controller.model.n_slices - 1)
+            self.controller.slider.setRange(
+                0, self.controller.model.n_slices - 1
+            )
+            # enable navigation after loading via the script editor
+            self.controller.slider.setEnabled(True)
             self.controller._update_view(reset_view=True)
 
         msg = QMessageBox(self)
@@ -485,7 +489,11 @@ class ScriptEditor(QDialog):
 
         for path in file_list:
             self.controller.model.load(path)
-            self.controller.slider.setRange(0, self.controller.model.n_slices - 1)
+            self.controller.slider.setRange(
+                0, self.controller.model.n_slices - 1
+            )
+            # ensure navigation works when processing multiple stacks
+            self.controller.slider.setEnabled(True)
             self.controller._update_view(reset_view=True)
             mask_name = os.path.splitext(os.path.basename(path))[0] + "_mask.tif"
             mask_path = os.path.join(save_folder, mask_name)
