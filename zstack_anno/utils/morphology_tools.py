@@ -582,14 +582,12 @@ def intensity_region_grow(
                         visited.add((ny, nx))
                         q.append((ny, nx))
             processed += 1
-            if progress and processed % 5000 == 0:
-                _print_progress(
-                    f"Int grow {idx}/{total}",
-                    processed,
-                    region_total,
-                    callback=progress_fn,
-                    mask=(labels > 0).astype(np.uint8),
-                )
+            if progress and processed % 5000 == 0 and progress_fn is not None:
+                # update the UI without spamming the console
+                try:
+                    progress_fn(processed, region_total, (labels > 0).astype(np.uint8))
+                except TypeError:
+                    progress_fn(processed, region_total)  # type: ignore[arg-type]
         
     final = label_components(labels > 0)
     return (final > 0).astype(np.uint8)
