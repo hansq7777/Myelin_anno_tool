@@ -59,6 +59,7 @@ def _print_progress(
     callback: Callable | None = None,
     *,
     line: int | None = None,
+    mask: np.ndarray | None = None,
 ) -> None:
     """Print or callback progress information.
 
@@ -79,7 +80,10 @@ def _print_progress(
 
     key = (prefix, line)
     if callback is not None:
-        callback(current, total)
+        try:
+            callback(current, total, mask)
+        except TypeError:
+            callback(current, total)  # type: ignore[arg-type]
         if current == 0:
             _START_TIMES.pop(key, None)
         return
@@ -299,10 +303,22 @@ def remove_mask_background(
         result = work_mask.copy()
         total = labels.max()
         if progress:
-            _print_progress("BG filter", 0, total, callback=progress_fn)
+            _print_progress(
+                "BG filter",
+                0,
+                total,
+                callback=progress_fn,
+                mask=result.copy(),
+            )
         for idx, lbl in enumerate(range(1, total + 1), start=1):
             if progress:
-                _print_progress("BG filter", idx, total, callback=progress_fn)
+                _print_progress(
+                    "BG filter",
+                    idx,
+                    total,
+                    callback=progress_fn,
+                    mask=result.copy(),
+                )
             region = labels == lbl
             if not np.any(region):
                 continue
@@ -314,7 +330,13 @@ def remove_mask_background(
     if num == 0:
         return work_mask.copy()
     if progress:
-        _print_progress("BG filter", 0, num, callback=progress_fn)
+        _print_progress(
+            "BG filter",
+            0,
+            num,
+            callback=progress_fn,
+            mask=work_mask.copy(),
+        )
 
     indices = np.arange(1, num + 1)
     thresholds = labeled_comprehension(
@@ -333,7 +355,13 @@ def remove_mask_background(
     result[(labels > 0) & (image < threshold_map)] = 0
 
     if progress:
-        _print_progress("BG filter", num, num, callback=progress_fn)
+        _print_progress(
+            "BG filter",
+            num,
+            num,
+            callback=progress_fn,
+            mask=result.copy(),
+        )
     return result
 
 
@@ -367,7 +395,13 @@ def remove_mask_background_stack(
 
     total = len(images)
     if progress:
-        _print_progress("BG filter", 0, total, callback=progress_fn)
+        _print_progress(
+            "BG filter",
+            0,
+            total,
+            callback=progress_fn,
+            mask=masks[0].copy() if len(masks) else None,
+        )
 
     if workers and workers > 1:
         from concurrent.futures import ThreadPoolExecutor
@@ -385,7 +419,13 @@ def remove_mask_background_stack(
             if progress:
                 with lock:
                     count += 1
-                    _print_progress("BG filter", count, total, callback=progress_fn)
+                    _print_progress(
+                        "BG filter",
+                        count,
+                        total,
+                        callback=progress_fn,
+                        mask=res if res is not None else None,
+                    )
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
             ex.map(task, [(i, im, mk) for i, (im, mk) in enumerate(zip(images, masks))])
@@ -396,7 +436,13 @@ def remove_mask_background_stack(
         result = []
         for idx, (img, msk) in enumerate(zip(images, masks), start=1):
             if progress:
-                _print_progress("BG filter", idx, total, callback=progress_fn)
+                _print_progress(
+                    "BG filter",
+                    idx,
+                    total,
+                    callback=progress_fn,
+                    mask=result[-1].copy() if result else None,
+                )
             result.append(remove_mask_background(img, msk, percentile))
         return np.stack(result)
 
@@ -482,12 +528,19 @@ def intensity_region_grow(
 
     total = len(unique)
     if progress:
-        _print_progress("Int grow", 0, total, callback=progress_fn)
+        _print_progress("Int grow", 0, total, callback=progress_fn,
+                        mask=(labels > 0).astype(np.uint8))
     for idx, lv in enumerate(unique, start=1):
         if cancel_event is not None and cancel_event.is_set():
             return mask
         if progress:
-            _print_progress("Int grow", idx, total, callback=progress_fn)
+            _print_progress(
+                "Int grow",
+                idx,
+                total,
+                callback=progress_fn,
+                mask=(labels > 0).astype(np.uint8),
+            )
         region = labels == lv
         if not np.any(region):
             continue
@@ -520,7 +573,11 @@ def intensity_region_grow(
             processed += 1
             if progress and processed % 5000 == 0:
                 _print_progress(
-                    f"Int grow {idx}/{total}", processed, region_total, callback=progress_fn
+                    f"Int grow {idx}/{total}",
+                    processed,
+                    region_total,
+                    callback=progress_fn,
+                    mask=(labels > 0).astype(np.uint8),
                 )
         
     final = label_components(labels > 0)
@@ -561,7 +618,13 @@ def flood_region_grow(
 
     total = len(unique)
     if progress:
-        _print_progress("Flood", 0, total, callback=progress_fn)
+        _print_progress(
+            "Flood",
+            0,
+            total,
+            callback=progress_fn,
+            mask=result.copy(),
+        )
 
     if workers and workers > 1 and total > 1:
         from concurrent.futures import ThreadPoolExecutor
@@ -581,7 +644,13 @@ def flood_region_grow(
             if progress:
                 with lock:
                     count += 1
-                    _print_progress("Flood", count, total, callback=progress_fn)
+                    _print_progress(
+                        "Flood",
+                        count,
+                        total,
+                        callback=progress_fn,
+                        mask=result.copy(),
+                    )
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
             ex.map(task, [(i, lv) for i, lv in enumerate(unique)])
@@ -596,7 +665,13 @@ def flood_region_grow(
             if cancel_event is not None and cancel_event.is_set():
                 return mask
             if progress:
-                _print_progress("Flood", idx, total, callback=progress_fn)
+                _print_progress(
+                    "Flood",
+                    idx,
+                    total,
+                    callback=progress_fn,
+                    mask=result.copy(),
+                )
             res = run_one(lv)
             if res is not None:
                 result[res] = 1
