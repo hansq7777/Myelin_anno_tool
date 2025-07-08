@@ -126,7 +126,7 @@ class ScriptEditor(QDialog):
         "Seed": {"method": "script_seed", "params": {"percentile": 85.0}},
         "Intensity Grow": {
             "method": "script_int_grow",
-            "params": {"diff_pct": 50.0, "hist_pct": 20.0},
+            "params": {"diff_pct": 50.0, "hist_pct": 20.0, "force_pct": None},
         },
         "Flood Grow": {
             "method": "script_flood_grow",

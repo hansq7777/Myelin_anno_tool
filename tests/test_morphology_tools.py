@@ -132,6 +132,24 @@ def test_intensity_region_grow():
     assert grown[0, 0] == 0
 
 
+def test_intensity_region_grow_force_percent():
+    img = np.array(
+        [
+            [20, 30, 30],
+            [40, 80, 30],
+            [40, 40, 90],
+        ],
+        dtype=float,
+    )
+    mask = np.zeros_like(img, dtype=np.uint8)
+    mask[1, 1] = 1
+    grown = intensity_region_grow(img, mask, diff_percent=1)
+    assert grown.sum() == 1
+    grown_force = intensity_region_grow(img, mask, diff_percent=1, force_percent=80)
+    assert grown_force.sum() > 1
+    assert grown_force[2, 2] == 1
+
+
 def test_flood_region_grow():
     img = np.array(
         [

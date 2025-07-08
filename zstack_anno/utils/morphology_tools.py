@@ -503,6 +503,7 @@ def intensity_region_grow(
     mask: np.ndarray,
     diff_percent: float = 20.0,
     hist_percent: float | None = None,
+    force_percent: float | None = None,
     progress: bool = False,
     progress_fn: Callable | None = None,
     cancel_event: 'threading.Event | None' = None,
@@ -512,7 +513,9 @@ def intensity_region_grow(
     Pixels are added to the region when their intensity is within
     ``diff_percent`` of the current seed pixel.  When ``hist_percent`` is
     provided, a global threshold is computed from the slice histogram and
-    pixels below this value are ignored completely.
+    pixels below this value are ignored completely.  If ``force_percent`` is
+    given, pixels brighter than the corresponding percentile are always added
+    regardless of ``diff_percent``.
 
     If ``cancel_event`` is provided and set during execution, the original
     ``mask`` is returned unchanged.
@@ -523,8 +526,11 @@ def intensity_region_grow(
     unique = unique[unique != 0]
     h, w = mask.shape
     thresh = None
+    force_thresh = None
     if hist_percent is not None:
         thresh = float(np.percentile(slice_, hist_percent))
+    if force_percent is not None:
+        force_thresh = float(np.percentile(slice_, force_percent))
 
     total = len(unique)
     if progress:
@@ -565,6 +571,11 @@ def intensity_region_grow(
                         continue
                     val = float(slice_[ny, nx])
                     if thresh is not None and val < thresh:
+                        continue
+                    if force_thresh is not None and val >= force_thresh:
+                        labels[ny, nx] = lv
+                        visited.add((ny, nx))
+                        q.append((ny, nx))
                         continue
                     if abs(val - seed_val) <= diff_thresh:
                         labels[ny, nx] = lv
