@@ -196,7 +196,7 @@ def test_remove_mask_background_stack_progress():
     masks = np.ones_like(imgs, dtype=np.uint8)
     calls: list[tuple[int, int]] = []
 
-    def cb(cur: int, total: int) -> None:
+    def cb(cur: int, total: int, mask=None) -> None:
         calls.append((cur, total))
 
     result = remove_mask_background_stack(
@@ -233,7 +233,7 @@ def test_remove_mask_background_progress():
     mask = np.ones_like(img, dtype=np.uint8)
     calls: list[tuple[int, int]] = []
 
-    def cb(cur: int, total: int) -> None:
+    def cb(cur: int, total: int, mask=None) -> None:
         calls.append((cur, total))
 
     result = remove_mask_background(

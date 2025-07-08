@@ -29,6 +29,7 @@ from ..utils.dialogs import question_with_shortcuts
 class IntGrowThread(QThread):
     finished = pyqtSignal(np.ndarray)
     cancelled = pyqtSignal()
+    progress = pyqtSignal(np.ndarray, int, int)
 
     def __init__(self, img: np.ndarray, mask: np.ndarray, diff: float, hist: float | None, event: threading.Event) -> None:
         super().__init__()
@@ -37,11 +38,27 @@ class IntGrowThread(QThread):
         self.diff = diff
         self.hist = hist
         self.event = event
+        self._next = 0.2
+
+    def _progress_cb(self, cur: int, total: int, mask: np.ndarray | None = None) -> None:
+        if mask is None:
+            return
+        if total == 0:
+            return
+        frac = cur / float(total)
+        if frac >= self._next:
+            self.progress.emit(mask.copy(), cur, total)
+            self._next += 0.2
 
     def run(self) -> None:
         result = morphology_tools.intensity_region_grow(
-            self.img, self.mask, self.diff, self.hist,
-            progress=True, cancel_event=self.event
+            self.img,
+            self.mask,
+            self.diff,
+            self.hist,
+            progress=True,
+            progress_fn=self._progress_cb,
+            cancel_event=self.event,
         )
         if self.event.is_set():
             self.cancelled.emit()
@@ -366,6 +383,17 @@ class MainController(QMainWindow):
         if hasattr(self, "info_label"):
             self.info_label.setText(info)
 
+    def _progress_update(self, cur: int, total: int, mask: np.ndarray | None = None) -> None:
+        if mask is None or total == 0:
+            return
+        if not hasattr(self, "_next_progress"):
+            self._next_progress = 0.2
+        frac = cur / float(total)
+        if frac >= self._next_progress:
+            self.canvas.set_mask(mask)
+            QApplication.processEvents()
+            self._next_progress += 0.2
+
     # --------- 辅助函数 ---------
     def _ensure_masks(self) -> bool:
         """Ensure mask stack exists, allocating it in memory if necessary."""
@@ -468,7 +496,10 @@ class MainController(QMainWindow):
         except ValueError:
             bins = 0
         self._push_undo("bg_filter")
-        self.model.remove_background(pct, bins, progress=True)
+        self._next_progress = 0.2
+        self.model.remove_background(
+            pct, bins, progress=True, progress_fn=self._progress_update
+        )
         self._update_view()
 
     def _apply_stretch(self) -> None:
@@ -551,6 +582,7 @@ class MainController(QMainWindow):
         )
         self.grow_thread.finished.connect(self._int_grow_finished)
         self.grow_thread.cancelled.connect(self._int_grow_cancelled)
+        self.grow_thread.progress.connect(self._thread_progress)
         self.grow_thread.start()
 
     def _int_grow_finished(self, result: np.ndarray) -> None:
@@ -565,6 +597,9 @@ class MainController(QMainWindow):
         self.cancel_btn.setEnabled(False)
         self.statusBar().showMessage("Operation cancelled")
         self.grow_thread = None
+
+    def _thread_progress(self, mask: np.ndarray, cur: int, total: int) -> None:
+        self._progress_update(cur, total, mask)
 
     def _cancel_operation(self) -> None:
         self.cancel_event.set()
@@ -615,8 +650,14 @@ class MainController(QMainWindow):
         self._push_undo("int_grow")
         img = self.model.get_current()
         cur = self.model.get_mask()
+        self._next_progress = 0.2
         grown = morphology_tools.intensity_region_grow(
-            img.astype(float), cur, diff_pct, hist_pct, progress=True
+            img.astype(float),
+            cur,
+            diff_pct,
+            hist_pct,
+            progress=True,
+            progress_fn=self._progress_update,
         )
         self.model.set_mask(grown)
         self._update_view()
@@ -629,6 +670,7 @@ class MainController(QMainWindow):
         self._push_undo("flood_grow")
         img = self.model.get_current()
         cur = self.model.get_mask()
+        self._next_progress = 0.2
         grown = morphology_tools.flood_region_grow(
             img.astype(float),
             cur,
@@ -636,6 +678,7 @@ class MainController(QMainWindow):
             tolerance=tolerance,
             workers=workers,
             progress=True,
+            progress_fn=self._progress_update,
         )
         self.model.set_mask(grown)
         self._update_view()
@@ -655,7 +698,10 @@ class MainController(QMainWindow):
         if not self._ensure_masks():
             return
         self._push_undo("bg_filter")
-        self.model.remove_background(percentile, bins, progress=True)
+        self._next_progress = 0.2
+        self.model.remove_background(
+            percentile, bins, progress=True, progress_fn=self._progress_update
+        )
         self._update_view()
 
     def script_next_slice(self) -> None:
