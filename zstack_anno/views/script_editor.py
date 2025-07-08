@@ -248,10 +248,12 @@ class ScriptEditor(QDialog):
         item.setData(Qt.UserRole, data)
         item.setText(self.format_step(data))
 
-    def run_script(self) -> None:
+    def run_script(self) -> float:
+        """Run the configured steps once and return the elapsed time."""
         if self.controller.model.data is None:
             QMessageBox.warning(self, "No Image", "Please load an image first")
-            return
+            return 0.0
+        start_time = time.monotonic()
         self._paused = False
         self._stopped = False
         for idx in range(self.step_list.count()):
@@ -281,8 +283,11 @@ class ScriptEditor(QDialog):
             method = getattr(self.controller, info["method"], None)
             if method:
                 prev_index = self.controller.model.index
+                step_start = time.monotonic()
                 method(**params)
+                step_time = time.monotonic() - step_start
                 self.controller.report_action(action, params)
+                print(f"Time for {action}: {step_time:.3f}s")
                 QApplication.processEvents()
                 if (
                     action == "Next Slice"
@@ -294,6 +299,7 @@ class ScriptEditor(QDialog):
                     time.sleep(0.1)
                 if self._stopped:
                     break
+        return time.monotonic() - start_time
 
     def save_script(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -383,8 +389,12 @@ class ScriptEditor(QDialog):
         """Run the script from ``start_idx`` to ``end_idx`` inclusive."""
         self.controller.slider.setValue(start_idx)
         while True:
-            self.run_script()
+            slice_start = self.controller.model.index
+            elapsed = self.run_script()
             self.controller.script_save()
+            print(
+                f"Slice {slice_start + 1}/{self.controller.model.n_slices} finished in {elapsed:.3f}s"
+            )
             if self.controller.model.index >= end_idx or self._stopped:
                 break
             self.controller.script_next_slice()
