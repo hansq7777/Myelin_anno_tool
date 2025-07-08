@@ -459,6 +459,7 @@ def intensity_region_grow(
     hist_percent: float | None = None,
     progress: bool = False,
     progress_fn: Callable | None = None,
+    update_fn: Callable[[np.ndarray], None] | None = None,
     cancel_event: 'threading.Event | None' = None,
 ) -> np.ndarray:
     """Grow ``mask`` based on intensity similarity.
@@ -469,7 +470,9 @@ def intensity_region_grow(
     pixels below this value are ignored completely.
 
     If ``cancel_event`` is provided and set during execution, the original
-    ``mask`` is returned unchanged.
+    ``mask`` is returned unchanged. When ``update_fn`` is given, it is called
+    with the intermediate mask after each connected component is processed so
+    callers can update the display in real time.
     """
 
     labels = label_components(mask)
@@ -522,7 +525,9 @@ def intensity_region_grow(
                 _print_progress(
                     f"Int grow {idx}/{total}", processed, region_total, callback=progress_fn
                 )
-        
+        if update_fn is not None:
+            update_fn((labels > 0).astype(np.uint8))
+
     final = label_components(labels > 0)
     return (final > 0).astype(np.uint8)
 

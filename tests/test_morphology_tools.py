@@ -188,6 +188,28 @@ def test_flood_region_grow_cancel():
     assert np.array_equal(grown, mask)
 
 
+def test_intensity_region_grow_update_fn():
+    img = np.array(
+        [[10, 10, 10, 10, 10],
+         [10, 50, 50, 50, 10],
+         [10, 50, 80, 50, 10],
+         [10, 50, 50, 50, 10],
+         [10, 10, 10, 10, 10]],
+        dtype=float,
+    )
+    mask = np.zeros_like(img, dtype=np.uint8)
+    mask[2, 2] = 1
+    mask[0, 0] = 1
+    updates: list[np.ndarray] = []
+
+    def cb(arr: np.ndarray) -> None:
+        updates.append(arr.copy())
+
+    result = intensity_region_grow(img, mask, diff_percent=50, update_fn=cb)
+    assert len(updates) == 2
+    assert np.array_equal(updates[-1], result)
+
+
 def test_remove_mask_background_stack_progress():
     imgs = np.array([
         [[10, 20], [30, 40]],
