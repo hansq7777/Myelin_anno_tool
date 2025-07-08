@@ -229,6 +229,7 @@ class ZStackModel:
     def remove_background(
         self,
         percentile: float,
+        bins: int = 0,
         slice_idx: int | None = None,
         *,
         progress: bool = False,
@@ -241,10 +242,20 @@ class ZStackModel:
             slice_idx = self.index
         img = self.data[slice_idx]
         mask = self.masks[slice_idx]
+
+        global_thresh = None
+        if bins and bins > 0:
+            values = self.data[self.masks > 0]
+            if values.size > 0:
+                hist, edges = np.histogram(values, bins=256)
+                idx = min(bins, len(edges) - 2)
+                global_thresh = float(edges[idx])
+
         new_mask = remove_mask_background(
             img,
             mask,
             percentile,
+            global_thresh,
             progress=progress,
             progress_fn=progress_fn,
         )

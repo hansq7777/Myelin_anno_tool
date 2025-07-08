@@ -101,6 +101,14 @@ def test_remove_mask_background_multiple_components():
     assert np.array_equal(filtered, mask)
 
 
+def test_remove_mask_background_global_thresh():
+    img = np.array([[10, 20], [30, 40]], dtype=np.uint8)
+    mask = np.ones_like(img, dtype=np.uint8)
+    filtered = remove_mask_background(img, mask, 0, global_thresh=25)
+    expected = np.array([[0, 0], [1, 1]], dtype=np.uint8)
+    assert np.array_equal(filtered, expected)
+
+
 def test_sample_seeds():
     img = np.arange(100, dtype=np.uint8).reshape(10, 10)
     seeds = sample_seeds(img, 90, num_seeds=5)
