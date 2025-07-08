@@ -504,6 +504,7 @@ def intensity_region_grow(
     diff_percent: float = 20.0,
     hist_percent: float | None = None,
     force_percent: float | None = None,
+    max_growth: int | None = None,
     progress: bool = False,
     progress_fn: Callable | None = None,
     cancel_event: 'threading.Event | None' = None,
@@ -518,7 +519,8 @@ def intensity_region_grow(
     regardless of ``diff_percent``.
 
     If ``cancel_event`` is provided and set during execution, the original
-    ``mask`` is returned unchanged.
+    ``mask`` is returned unchanged. When ``max_growth`` is given, no more than
+    this number of pixels will be added to any single component.
     """
 
     labels = label_components(mask)
@@ -554,6 +556,8 @@ def intensity_region_grow(
         visited = set(q)
         processed = 0
         region_total = int(region.sum())
+        added = 0
+        reached = False
         while q:
             if cancel_event is not None and cancel_event.is_set():
                 return mask
@@ -576,11 +580,23 @@ def intensity_region_grow(
                         labels[ny, nx] = lv
                         visited.add((ny, nx))
                         q.append((ny, nx))
+                        added += 1
+                        if max_growth is not None and added >= max_growth:
+                            reached = True
+                            break
                         continue
                     if abs(val - seed_val) <= diff_thresh:
                         labels[ny, nx] = lv
                         visited.add((ny, nx))
                         q.append((ny, nx))
+                        added += 1
+                        if max_growth is not None and added >= max_growth:
+                            reached = True
+                            break
+                if reached:
+                    break
+            if reached:
+                break
             processed += 1
             if progress and processed % 5000 == 0 and progress_fn is not None:
                 # update the UI without spamming the console
@@ -588,6 +604,8 @@ def intensity_region_grow(
                     progress_fn(processed, region_total, (labels > 0).astype(np.uint8))
                 except TypeError:
                     progress_fn(processed, region_total)  # type: ignore[arg-type]
+            if reached:
+                break
         
     final = label_components(labels > 0)
     return (final > 0).astype(np.uint8)
