@@ -31,7 +31,16 @@ class IntGrowThread(QThread):
     cancelled = pyqtSignal()
     progress = pyqtSignal(np.ndarray, int, int)
 
-    def __init__(self, img: np.ndarray, mask: np.ndarray, diff: float, hist: float | None, force: float | None, event: threading.Event) -> None:
+    def __init__(
+        self,
+        img: np.ndarray,
+        mask: np.ndarray,
+        diff: float,
+        hist: float | None,
+        force: float | None,
+        event: threading.Event,
+        limit: int | None = None,
+    ) -> None:
         super().__init__()
         self.img = img
         self.mask = mask
@@ -39,6 +48,7 @@ class IntGrowThread(QThread):
         self.hist = hist
         self.force = force
         self.event = event
+        self.limit = limit
         self._next = 0.2
 
     def _progress_cb(self, cur: int, total: int, mask: np.ndarray | None = None) -> None:
@@ -58,6 +68,7 @@ class IntGrowThread(QThread):
             self.diff,
             self.hist,
             self.force,
+            self.limit,
             progress=True,
             progress_fn=self._progress_cb,
             cancel_event=self.event,
@@ -646,7 +657,13 @@ class MainController(QMainWindow):
         self.model.set_mask(cur)
         self._update_view()
 
-    def script_int_grow(self, diff_pct: float = 20.0, hist_pct: float | None = None, force_pct: float | None = None) -> None:
+    def script_int_grow(
+        self,
+        diff_pct: float = 20.0,
+        hist_pct: float | None = None,
+        force_pct: float | None = None,
+        limit: int | None = 30000,
+    ) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("int_grow")
@@ -659,6 +676,7 @@ class MainController(QMainWindow):
             diff_pct,
             hist_pct,
             force_pct,
+            limit,
             progress=True,
             progress_fn=self._progress_update,
         )
