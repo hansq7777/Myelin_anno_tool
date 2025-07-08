@@ -99,6 +99,12 @@ class MainController(QMainWindow):
         self._build_layout()
         self._create_menu()
         self.statusBar().showMessage("Ready")
+        # Show image and mask path in the status bar
+        self.image_label = QLabel("")
+        self.mask_label = QLabel("")
+        self.statusBar().addPermanentWidget(self.image_label)
+        self.statusBar().addPermanentWidget(self.mask_label)
+        self._update_file_labels()
         # Capture key events from child widgets
         self.installEventFilter(self)
         self.canvas.installEventFilter(self)
@@ -323,6 +329,7 @@ class MainController(QMainWindow):
         )
         if path:
             self.model.save_masks(path)
+            self._update_file_labels()
 
     def _quick_save_masks(self) -> None:
         """Save masks to existing path or prompt for one if needed."""
@@ -332,6 +339,7 @@ class MainController(QMainWindow):
             self._save_masks()
         else:
             self.model.save_masks()
+        self._update_file_labels()
 
     def _create_masks(self):
         if self.model.data is None:
@@ -395,6 +403,7 @@ class MainController(QMainWindow):
         )
         if hasattr(self, "info_label"):
             self.info_label.setText(info)
+        self._update_file_labels()
 
     def _progress_update(self, cur: int, total: int, mask: np.ndarray | None = None) -> None:
         if mask is None or total == 0:
@@ -427,6 +436,19 @@ class MainController(QMainWindow):
             if self.history:
                 self.history.pop(0)
         self.redo_stack.clear()
+
+    def _short_path(self, path: str | None) -> str:
+        if not path:
+            return "(none)"
+        parent = os.path.basename(os.path.dirname(path))
+        name = os.path.basename(path)
+        return os.path.join(parent, name)
+
+    def _update_file_labels(self) -> None:
+        if hasattr(self, "image_label"):
+            self.image_label.setText(f"Image: {self._short_path(self.model.path)}")
+        if hasattr(self, "mask_label"):
+            self.mask_label.setText(f"Mask: {self._short_path(self.model.mask_path)}")
 
     # --------- 文件操作 ---------
 
