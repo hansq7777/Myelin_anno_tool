@@ -35,9 +35,10 @@ Undo and redo are found under
 ### Script Editor
 
 The **Tools** menu opens a Script Editor for building simple automation
-workflows. Drag actions from the list on the right into the sequence on the
-left, adjust their parameters, then run, pause or stop the script. Sequences can
-be saved to or loaded from JSON files.
+workflows. The editor appears in its own window so you can keep interacting
+with the main interface while it is open. Drag actions from the list on the
+right into the sequence on the left, adjust their parameters, then run, pause or
+stop the script. Sequences can be saved to or loaded from JSON files.
 
 ## Running the tests
 
