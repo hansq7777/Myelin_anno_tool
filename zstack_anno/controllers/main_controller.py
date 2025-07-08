@@ -31,12 +31,13 @@ class IntGrowThread(QThread):
     cancelled = pyqtSignal()
     progress = pyqtSignal(np.ndarray, int, int)
 
-    def __init__(self, img: np.ndarray, mask: np.ndarray, diff: float, hist: float | None, event: threading.Event) -> None:
+    def __init__(self, img: np.ndarray, mask: np.ndarray, diff: float, hist: float | None, force: float | None, event: threading.Event) -> None:
         super().__init__()
         self.img = img
         self.mask = mask
         self.diff = diff
         self.hist = hist
+        self.force = force
         self.event = event
         self._next = 0.2
 
@@ -56,6 +57,7 @@ class IntGrowThread(QThread):
             self.mask,
             self.diff,
             self.hist,
+            self.force,
             progress=True,
             progress_fn=self._progress_cb,
             cancel_event=self.event,
@@ -578,7 +580,7 @@ class MainController(QMainWindow):
         self.cancel_btn.setEnabled(True)
         self.int_grow_btn.setEnabled(False)
         self.grow_thread = IntGrowThread(
-            img.astype(float), cur, diff_pct, hist_pct, self.cancel_event
+            img.astype(float), cur, diff_pct, hist_pct, None, self.cancel_event
         )
         self.grow_thread.finished.connect(self._int_grow_finished)
         self.grow_thread.cancelled.connect(self._int_grow_cancelled)
@@ -644,7 +646,7 @@ class MainController(QMainWindow):
         self.model.set_mask(cur)
         self._update_view()
 
-    def script_int_grow(self, diff_pct: float = 20.0, hist_pct: float | None = None) -> None:
+    def script_int_grow(self, diff_pct: float = 20.0, hist_pct: float | None = None, force_pct: float | None = None) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("int_grow")
@@ -656,6 +658,7 @@ class MainController(QMainWindow):
             cur,
             diff_pct,
             hist_pct,
+            force_pct,
             progress=True,
             progress_fn=self._progress_update,
         )
