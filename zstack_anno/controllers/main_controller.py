@@ -96,6 +96,7 @@ class MainController(QMainWindow):
         self._delete_start = None
         self.cancel_event = threading.Event()
         self.grow_thread: IntGrowThread | None = None
+        self.script_editor: ScriptEditor | None = None
         self._build_layout()
         self._create_menu()
         self.statusBar().showMessage("Ready")
@@ -965,7 +966,13 @@ class MainController(QMainWindow):
         QMessageBox.information(self, "Help", text)
 
     def _open_script_editor(self) -> None:
-        """Open the script editor window."""
-        dlg = ScriptEditor(self)
-        dlg.exec_()
+        """Open the script editor window as a non-modal dialog."""
+        if getattr(self, "script_editor", None) is None:
+            self.script_editor = ScriptEditor(self)
+            self.script_editor.destroyed.connect(
+                lambda: setattr(self, "script_editor", None)
+            )
+        self.script_editor.show()
+        self.script_editor.raise_()
+        self.script_editor.activateWindow()
 
