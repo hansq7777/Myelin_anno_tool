@@ -2,7 +2,10 @@ import sys
 import time
 import numpy as np
 import warnings
+import logging
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 try:
     from skimage.morphology import binary_dilation as sk_binary_dilation
@@ -11,7 +14,8 @@ try:
     from skimage.morphology import skeletonize, skeletonize_3d, medial_axis
     from skimage.measure import label
     from skimage.segmentation import flood
-except Exception:  # pragma: no cover - scikit-image may be unavailable
+except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
+    logger.warning("scikit-image import failed: %s", exc)
     sk_binary_dilation = None  # type: ignore
     sk_binary_erosion = None  # type: ignore
     remove_small_objects = None  # type: ignore
@@ -24,7 +28,8 @@ except Exception:  # pragma: no cover - scikit-image may be unavailable
 else:
     try:
         from skimage.filters import gaussian
-    except Exception:  # pragma: no cover - scikit-image may be unavailable
+    except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
+        logger.warning("scikit-image.filters import failed: %s", exc)
         gaussian = None  # type: ignore
 
 try:
@@ -32,7 +37,8 @@ try:
     from scipy.ndimage import binary_erosion as nd_binary_erosion
     from scipy.ndimage import label as nd_label
     from scipy.ndimage import labeled_comprehension
-except Exception:  # pragma: no cover - scipy may be unavailable
+except ImportError as exc:  # pragma: no cover - scipy may be unavailable
+    logger.warning("scipy.ndimage import failed: %s", exc)
     nd_binary_dilation = None  # type: ignore
     nd_binary_erosion = None  # type: ignore
     nd_label = None  # type: ignore
@@ -40,7 +46,8 @@ except Exception:  # pragma: no cover - scipy may be unavailable
 
 try:
     from scipy.ndimage import gaussian_filter  # type: ignore
-except Exception:  # pragma: no cover - scipy may be unavailable
+except ImportError as exc:  # pragma: no cover - scipy may be unavailable
+    logger.warning("scipy.ndimage gaussian_filter import failed: %s", exc)
     gaussian_filter = None
 
 
