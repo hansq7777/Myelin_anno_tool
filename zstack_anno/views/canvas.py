@@ -61,7 +61,9 @@ class SliceCanvas(QGraphicsView):
             if img is not None:
                 w = img.width()
                 h = img.height()
-                arr = np.frombuffer(img.bits(), dtype=np.uint8).reshape(h, w, 4)
+                buf = img.bits()
+                buf.setsize(img.byteCount())
+                arr = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 4)
                 arr[..., 3] = (arr[..., 3] > 0).astype(np.uint8) * int(255 * opacity)
                 new_img = QImage(arr.data, w, h, QImage.Format_RGBA8888)
                 self._mask_item.setPixmap(QPixmap.fromImage(new_img))
