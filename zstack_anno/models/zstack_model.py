@@ -264,23 +264,33 @@ class ZStackModel:
         self.set_mask(new_mask, slice_idx)
 
     def threshold_absolute(self, value: float, slice_idx: int | None = None) -> None:
-        """Set mask to pixels above ``value`` on ``slice_idx``."""
+        """Mark pixels above ``value`` without altering existing foreground."""
         if self.data is None:
             return
         if slice_idx is None:
             slice_idx = self.index
         slice_ = self.data[slice_idx]
-        mask = threshold_absolute(slice_, value)
+        thresh_mask = threshold_absolute(slice_, value)
+        if self.masks is None:
+            mask = thresh_mask
+        else:
+            mask = self.get_mask(slice_idx).copy()
+            mask[(mask == 0) & (thresh_mask > 0)] = 1
         self.set_mask(mask, slice_idx)
 
     def threshold_normalized(self, percent: float, slice_idx: int | None = None) -> None:
-        """Threshold slice by normalized percentage."""
+        """Threshold slice by normalized percentage without removing labels."""
         if self.data is None:
             return
         if slice_idx is None:
             slice_idx = self.index
         slice_ = self.data[slice_idx]
-        mask = threshold_normalized(slice_, percent)
+        thresh_mask = threshold_normalized(slice_, percent)
+        if self.masks is None:
+            mask = thresh_mask
+        else:
+            mask = self.get_mask(slice_idx).copy()
+            mask[(mask == 0) & (thresh_mask > 0)] = 1
         self.set_mask(mask, slice_idx)
 
     # --------- utility methods ---------
