@@ -15,6 +15,8 @@ from zstack_anno.utils.morphology_tools import (
     label_components,
     remove_small,
     histogram_stretch_stack,
+    threshold_absolute,
+    threshold_normalized,
     remove_mask_background,
     remove_mask_background_stack,
     sample_seeds,
@@ -64,6 +66,21 @@ def test_remove_small():
         dtype=np.uint8,
     )
     assert np.array_equal(filtered, expected)
+
+
+def test_threshold_absolute():
+    img = np.array([[5, 10], [15, 20]], dtype=np.uint8)
+    mask = threshold_absolute(img, 12)
+    expected = np.array([[0, 0], [1, 1]], dtype=np.uint8)
+    assert np.array_equal(mask, expected)
+
+
+def test_threshold_normalized():
+    img = np.array([[0, 50], [100, 150]], dtype=np.uint8)
+    mask = threshold_normalized(img, 50.0)
+    norm = (img - img.min()) / (img.max() - img.min())
+    expected = (norm >= 0.5).astype(np.uint8)
+    assert np.array_equal(mask, expected)
 
 
 def test_histogram_stretch_stack():

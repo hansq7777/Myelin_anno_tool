@@ -162,6 +162,21 @@ class MainController(QMainWindow):
         filter_layout.addWidget(self.filter_spin)
         ctrl.addLayout(filter_layout)
 
+        thresh_layout = QVBoxLayout()
+        self.abs_thresh_edit = QLineEdit()
+        self.abs_thresh_edit.setPlaceholderText("Abs >")
+        self.abs_thresh_btn = QPushButton("Th Abs")
+        self.abs_thresh_btn.clicked.connect(self._threshold_abs)
+        self.norm_thresh_edit = QLineEdit()
+        self.norm_thresh_edit.setPlaceholderText("Norm %")
+        self.norm_thresh_btn = QPushButton("Th Norm")
+        self.norm_thresh_btn.clicked.connect(self._threshold_norm)
+        thresh_layout.addWidget(self.abs_thresh_edit)
+        thresh_layout.addWidget(self.abs_thresh_btn)
+        thresh_layout.addWidget(self.norm_thresh_edit)
+        thresh_layout.addWidget(self.norm_thresh_btn)
+        ctrl.addLayout(thresh_layout)
+
 
         bg_layout = QVBoxLayout()
         self.bg_percentile_edit = QLineEdit()
@@ -271,6 +286,10 @@ class MainController(QMainWindow):
         erode_act.triggered.connect(self._erode_current)
         filter_act = mask_menu.addAction("Filter Small")
         filter_act.triggered.connect(self._filter_small)
+        thresh_abs_act = mask_menu.addAction("Threshold Abs")
+        thresh_abs_act.triggered.connect(self._threshold_abs)
+        thresh_norm_act = mask_menu.addAction("Threshold Norm")
+        thresh_norm_act.triggered.connect(self._threshold_norm)
         bg_act = mask_menu.addAction("Remove Background")
         bg_act.triggered.connect(self._apply_bg_filter)
         seed_act = mask_menu.addAction("Seed")
@@ -534,6 +553,27 @@ class MainController(QMainWindow):
         self.model.set_mask(new)
         self._update_view()
 
+    def _threshold_abs(self) -> None:
+        if not self._ensure_masks():
+            return
+        try:
+            value = float(self.abs_thresh_edit.text())
+        except ValueError:
+            value = 0.0
+        self._push_undo("thresh_abs")
+        self.model.threshold_absolute(value)
+        self._update_view()
+
+    def _threshold_norm(self) -> None:
+        if not self._ensure_masks():
+            return
+        try:
+            pct = float(self.norm_thresh_edit.text())
+        except ValueError:
+            pct = 50.0
+        self._push_undo("thresh_norm")
+        self.model.threshold_normalized(pct)
+        self._update_view()
 
     def _apply_bg_filter(self) -> None:
         if not self._ensure_masks():
@@ -683,6 +723,20 @@ class MainController(QMainWindow):
         cur = self.model.get_mask()
         new = morphology_tools.remove_small(cur, threshold)
         self.model.set_mask(new)
+        self._update_view()
+
+    def script_threshold_abs(self, value: float = 0.0) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("thresh_abs")
+        self.model.threshold_absolute(value)
+        self._update_view()
+
+    def script_threshold_norm(self, percent: float = 50.0) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("thresh_norm")
+        self.model.threshold_normalized(percent)
         self._update_view()
 
     def script_seed(self, percentile: float = 90.0) -> None:

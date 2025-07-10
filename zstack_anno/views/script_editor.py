@@ -124,6 +124,8 @@ class ScriptEditor(QDialog):
         "Dilate": {"method": "script_dilate", "params": {"iterations": 1}},
         "Erode": {"method": "script_erode", "params": {"iterations": 1}},
         "Filter Small": {"method": "script_filter_small", "params": {"threshold": 100}},
+        "Threshold Abs": {"method": "script_threshold_abs", "params": {"value": 0.0}},
+        "Threshold Norm": {"method": "script_threshold_norm", "params": {"percent": 50.0}},
         "Seed": {"method": "script_seed", "params": {"percentile": 85.0}},
         "Intensity Grow": {
             "method": "script_int_grow",

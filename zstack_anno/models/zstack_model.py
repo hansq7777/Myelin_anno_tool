@@ -7,6 +7,8 @@ from ..utils.morphology_tools import (
     histogram_stretch_stack,
     remove_mask_background,
     gaussian_blur_stack,
+    threshold_absolute,
+    threshold_normalized,
 )
 
 
@@ -260,6 +262,26 @@ class ZStackModel:
             progress_fn=progress_fn,
         )
         self.set_mask(new_mask, slice_idx)
+
+    def threshold_absolute(self, value: float, slice_idx: int | None = None) -> None:
+        """Set mask to pixels above ``value`` on ``slice_idx``."""
+        if self.data is None:
+            return
+        if slice_idx is None:
+            slice_idx = self.index
+        slice_ = self.data[slice_idx]
+        mask = threshold_absolute(slice_, value)
+        self.set_mask(mask, slice_idx)
+
+    def threshold_normalized(self, percent: float, slice_idx: int | None = None) -> None:
+        """Threshold slice by normalized percentage."""
+        if self.data is None:
+            return
+        if slice_idx is None:
+            slice_idx = self.index
+        slice_ = self.data[slice_idx]
+        mask = threshold_normalized(slice_, percent)
+        self.set_mask(mask, slice_idx)
 
     # --------- utility methods ---------
     def delete_components_touching_rect(

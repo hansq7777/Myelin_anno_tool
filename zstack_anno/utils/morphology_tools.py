@@ -233,6 +233,22 @@ def remove_small_stack(stack: np.ndarray, min_size: int) -> np.ndarray:
     return np.stack([remove_small(slice_, min_size) for slice_ in stack])
 
 
+def threshold_absolute(slice_: np.ndarray, value: float) -> np.ndarray:
+    """Return binary mask of pixels strictly above ``value``."""
+    return (slice_.astype(float) > value).astype(np.uint8)
+
+
+def threshold_normalized(slice_: np.ndarray, percent: float) -> np.ndarray:
+    """Threshold slice after normalizing to 0-1 range by ``percent``."""
+    arr = slice_.astype(float)
+    mn = float(arr.min())
+    mx = float(arr.max())
+    if mx <= mn:
+        return np.zeros_like(slice_, dtype=np.uint8)
+    norm = (arr - mn) / (mx - mn)
+    return (norm >= (percent / 100.0)).astype(np.uint8)
+
+
 def histogram_stretch(slice_: np.ndarray, percentile: float) -> np.ndarray:
     """Stretch contrast of a slice using percentile exclusion."""
     low = np.percentile(slice_, percentile)
