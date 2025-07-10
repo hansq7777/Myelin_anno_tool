@@ -104,3 +104,23 @@ def test_blur_and_stretch_are_absolute():
     model.histogram_stretch(10)
     expected_stretch = histogram_stretch_stack(arr, 10)
     assert np.array_equal(model.data, expected_stretch)
+
+
+def test_threshold_absolute_overlay():
+    model = ZStackModel()
+    model.data = np.array([[[0, 5], [10, 15]]], dtype=np.uint8)
+    model.ensure_masks()
+    model.masks[0, 0, 0] = 1
+    model.threshold_absolute(5, slice_idx=0)
+    expected = np.array([[1, 1], [1, 1]], dtype=np.uint8)
+    assert np.array_equal(model.get_mask(0), expected)
+
+
+def test_threshold_normalized_overlay():
+    model = ZStackModel()
+    model.data = np.array([[[0, 50], [100, 150]]], dtype=np.uint8)
+    model.ensure_masks()
+    model.masks[0, 0, 0] = 1
+    model.threshold_normalized(50.0, slice_idx=0)
+    expected = np.array([[1, 0], [1, 1]], dtype=np.uint8)
+    assert np.array_equal(model.get_mask(0), expected)

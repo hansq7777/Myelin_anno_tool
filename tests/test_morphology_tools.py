@@ -69,9 +69,9 @@ def test_remove_small():
 
 
 def test_threshold_absolute():
-    img = np.array([[5, 10], [15, 20]], dtype=np.uint8)
-    mask = threshold_absolute(img, 12)
-    expected = np.array([[0, 0], [1, 1]], dtype=np.uint8)
+    img = np.array([[0, 5], [10, 15]], dtype=np.uint8)
+    mask = threshold_absolute(img, 5)
+    expected = np.array([[0, 1], [1, 1]], dtype=np.uint8)
     assert np.array_equal(mask, expected)
 
 

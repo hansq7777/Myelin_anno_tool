@@ -234,8 +234,8 @@ def remove_small_stack(stack: np.ndarray, min_size: int) -> np.ndarray:
 
 
 def threshold_absolute(slice_: np.ndarray, value: float) -> np.ndarray:
-    """Return binary mask of pixels strictly above ``value``."""
-    return (slice_.astype(float) > value).astype(np.uint8)
+    """Return binary mask of pixels greater than or equal to ``value``."""
+    return (slice_.astype(float) >= value).astype(np.uint8)
 
 
 def threshold_normalized(slice_: np.ndarray, percent: float) -> np.ndarray:
