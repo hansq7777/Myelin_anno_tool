@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QLabel,
     QSpinBox,
+    QInputDialog,
     QMessageBox,
 )
 from PyQt5.QtCore import Qt, QEvent, QPoint, QThread, pyqtSignal
@@ -144,11 +145,14 @@ class MainController(QMainWindow):
         self.dilate_btn.clicked.connect(self._dilate_current)
         self.erode_btn = QPushButton("Erode")
         self.erode_btn.clicked.connect(self._erode_current)
+        self.skeleton_btn = QPushButton("Skeleton")
+        self.skeleton_btn.clicked.connect(self._skeletonize_current)
         self.strength_spin = QSpinBox()
         self.strength_spin.setRange(1, 10)
         self.strength_spin.setValue(1)
         morph_layout.addWidget(self.dilate_btn)
         morph_layout.addWidget(self.erode_btn)
+        morph_layout.addWidget(self.skeleton_btn)
         morph_layout.addWidget(self.strength_spin)
         ctrl.addLayout(morph_layout)
 
@@ -284,6 +288,8 @@ class MainController(QMainWindow):
         dilate_act.triggered.connect(self._dilate_current)
         erode_act = mask_menu.addAction("Erode")
         erode_act.triggered.connect(self._erode_current)
+        skel_act = mask_menu.addAction("Skeleton")
+        skel_act.triggered.connect(self._skeletonize_current)
         filter_act = mask_menu.addAction("Filter Small")
         filter_act.triggered.connect(self._filter_small)
         thresh_abs_act = mask_menu.addAction("Threshold Abs")
@@ -553,6 +559,42 @@ class MainController(QMainWindow):
         self.model.set_mask(new)
         self._update_view()
 
+    def _skeletonize_current(self) -> None:
+        if not self._ensure_masks():
+            return
+        algorithms = ["skeletonize", "skeletonize_3d", "medial_axis"]
+        alg, ok = QInputDialog.getItem(
+            self, "Skeletonize", "Algorithm:", algorithms, 0, False
+        )
+        if not ok or not alg:
+            return
+        params: dict[str, object] = {}
+        if alg == "medial_axis":
+            choice, ok = QInputDialog.getItem(
+                self,
+                "Return Distance",
+                "Return distance?",
+                ["False", "True"],
+                0,
+                False,
+            )
+            if not ok:
+                return
+            params["return_distance"] = choice == "True"
+        self._push_undo("skeletonize")
+        if alg == "skeletonize_3d":
+            if self.model.masks is None:
+                return
+            result = morphology_tools.skeletonize_stack(
+                self.model.masks, algorithm=alg, **params
+            )
+            self.model.masks = result
+        else:
+            cur = self.model.get_mask()
+            new = morphology_tools.skeletonize_slice(cur, algorithm=alg, **params)
+            self.model.set_mask(new)
+        self._update_view()
+
     def _threshold_abs(self) -> None:
         if not self._ensure_masks():
             return
@@ -723,6 +765,28 @@ class MainController(QMainWindow):
         cur = self.model.get_mask()
         new = morphology_tools.remove_small(cur, threshold)
         self.model.set_mask(new)
+        self._update_view()
+
+    def script_skeletonize(
+        self, algorithm: str = "skeletonize", return_distance: bool = False
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("skeletonize")
+        if algorithm == "skeletonize_3d":
+            if self.model.masks is None:
+                return
+            result = morphology_tools.skeletonize_stack(
+                self.model.masks, algorithm=algorithm
+            )
+            self.model.masks = result
+        else:
+            cur = self.model.get_mask()
+            params = {}
+            if algorithm == "medial_axis":
+                params["return_distance"] = return_distance
+            new = morphology_tools.skeletonize_slice(cur, algorithm=algorithm, **params)
+            self.model.set_mask(new)
         self._update_view()
 
     def script_threshold_abs(self, value: float = 0.0) -> None:

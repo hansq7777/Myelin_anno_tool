@@ -22,6 +22,8 @@ from zstack_anno.utils.morphology_tools import (
     sample_seeds,
     intensity_region_grow,
     flood_region_grow,
+    skeletonize_slice,
+    skeletonize_stack,
 )
 
 
@@ -289,6 +291,22 @@ def test_remove_mask_background_progress():
     assert result.shape == img.shape
     assert calls[0] == (0, 1)
     assert calls[-1] == (1, 1)
+
+
+def test_skeletonize_slice():
+    mask = np.zeros((5, 5), dtype=np.uint8)
+    mask[2, 1:4] = 1
+    result = skeletonize_slice(mask)
+    assert result.sum() <= mask.sum()
+    assert result[2, 2] == 1
+
+
+def test_skeletonize_stack_3d():
+    stack = np.zeros((2, 5, 5), dtype=np.uint8)
+    stack[:, 2, 1:4] = 1
+    result = skeletonize_stack(stack, algorithm="skeletonize_3d")
+    assert result.shape == stack.shape
+    assert result.sum() > 0
 
 
 

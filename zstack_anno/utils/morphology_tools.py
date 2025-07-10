@@ -8,7 +8,7 @@ try:
     from skimage.morphology import binary_dilation as sk_binary_dilation
     from skimage.morphology import binary_erosion as sk_binary_erosion
     from skimage.morphology import remove_small_objects
-    from skimage.morphology import skeletonize
+    from skimage.morphology import skeletonize, skeletonize_3d, medial_axis
     from skimage.measure import label
     from skimage.segmentation import flood
 except Exception:  # pragma: no cover - scikit-image may be unavailable
@@ -16,6 +16,8 @@ except Exception:  # pragma: no cover - scikit-image may be unavailable
     sk_binary_erosion = None  # type: ignore
     remove_small_objects = None  # type: ignore
     skeletonize = None  # type: ignore
+    skeletonize_3d = None  # type: ignore
+    medial_axis = None  # type: ignore
     label = None  # type: ignore
     gaussian = None  # type: ignore
     flood = None  # type: ignore
@@ -734,6 +736,33 @@ def _skeletonize_numpy(slice_: np.ndarray) -> np.ndarray:
         skeleton |= temp
         working = eroded
     return skeleton
+
+
+def skeletonize_slice(slice_: np.ndarray, algorithm: str = "skeletonize", **kwargs) -> np.ndarray:
+    """Skeletonize a single binary slice using the chosen algorithm."""
+    img = slice_ > 0
+    if algorithm == "skeletonize_3d":
+        raise ValueError("skeletonize_3d requires a 3-D stack")
+    if algorithm == "medial_axis":
+        if medial_axis is not None:
+            result = medial_axis(img, **kwargs)
+            if isinstance(result, tuple):
+                result = result[0]
+            return result.astype(slice_.dtype)
+    else:
+        if skeletonize is not None:
+            return skeletonize(img).astype(slice_.dtype)
+    return _skeletonize_numpy(slice_)
+
+
+def skeletonize_stack(stack: np.ndarray, algorithm: str = "skeletonize", **kwargs) -> np.ndarray:
+    """Skeletonize an entire mask stack or volume."""
+    if algorithm == "skeletonize_3d":
+        if skeletonize_3d is not None:
+            return skeletonize_3d(stack > 0).astype(stack.dtype)
+        # fallback: apply 2D skeletonization slice by slice
+        return np.stack([_skeletonize_numpy(s) for s in stack])
+    return np.stack([skeletonize_slice(s, algorithm, **kwargs) for s in stack])
 
 
 def _neighbor_count(arr: np.ndarray) -> np.ndarray:
