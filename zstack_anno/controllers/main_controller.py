@@ -23,6 +23,7 @@ from ..views.canvas import SliceCanvas
 from ..views.script_editor import ScriptEditor
 from ..utils import morphology_tools
 from ..utils.dialogs import question_with_shortcuts
+from ..utils import config
 
 
 class IntGrowThread(QThread):
@@ -237,11 +238,14 @@ class MainController(QMainWindow):
 
         new_mask_act = file_menu.addAction("New Mask Stack…")
         new_mask_act.triggered.connect(self._create_masks)
-        new_mask_act.setShortcuts(["Ctrl+M", "Meta+M"])
+        new_mask_act.setShortcuts(["Ctrl+Shift+M", "Meta+Shift+M"])
 
         open_mask_act = file_menu.addAction("Open Masks…")
         open_mask_act.triggered.connect(self._open_masks)
-        open_mask_act.setShortcuts(["Ctrl+Shift+M", "Meta+Shift+M"])
+        open_mask_act.setShortcuts(["Ctrl+M", "Meta+M"])
+
+        mask_folder_act = file_menu.addAction("Set Mask Folder…")
+        mask_folder_act.triggered.connect(self._set_mask_folder)
 
         quick_save_act = file_menu.addAction("Quick Save")
         quick_save_act.triggered.connect(self._quick_save_masks)
@@ -306,6 +310,15 @@ class MainController(QMainWindow):
             self.model.load(path)
             self.slider.setRange(0, self.model.n_slices - 1)
             self.slider.setEnabled(True)
+            mask_folder = config.get("mask_folder")
+            if mask_folder:
+                base = os.path.splitext(os.path.basename(path))[0] + "_mask.tif"
+                mask_path = os.path.join(mask_folder, base)
+                if os.path.exists(mask_path):
+                    try:
+                        self.model.load_masks(mask_path)
+                    except Exception:
+                        pass
             self._update_view(reset_view=True)
 
     def _open_masks(self):
@@ -343,11 +356,13 @@ class MainController(QMainWindow):
     def _create_masks(self):
         if self.model.data is None:
             return
-        default = self.model.default_mask_path()
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Create Mask Stack", default, "TIFF Images (*.tif)"
+        default_folder = os.path.dirname(self.model.path) if self.model.path else ""
+        folder = QFileDialog.getExistingDirectory(
+            self, "Create Mask Stack", default_folder
         )
-        if path:
+        if folder:
+            base = os.path.splitext(os.path.basename(self.model.path))[0] + "_mask.tif"
+            path = os.path.join(folder, base)
             self.model.create_blank_masks(path)
             self._update_view()
 
@@ -897,6 +912,16 @@ class MainController(QMainWindow):
         """Prompt for a folder to load or save annotations."""
         path = QFileDialog.getExistingDirectory(self, "Select Annotation Folder")
         return path or None
+
+    def _set_mask_folder(self) -> None:
+        """Select and remember the default mask folder."""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select Mask Folder",
+            config.get("mask_folder", ""),
+        )
+        if folder:
+            config.set("mask_folder", folder)
 
     def close_current(self) -> None:
         """Close the currently loaded data and reset the view."""
