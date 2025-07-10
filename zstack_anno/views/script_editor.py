@@ -493,6 +493,17 @@ class ScriptEditor(QDialog):
             if not file_list:
                 return
 
+        start_slice, ok = QInputDialog.getInt(
+            self,
+            "Start Slice",
+            "Start processing from which slice?",
+            1,
+            1,
+        )
+        if not ok:
+            return
+        start_idx = start_slice - 1
+
         save_folder = QFileDialog.getExistingDirectory(self, "Select Save Folder")
         if not save_folder:
             return
@@ -508,7 +519,8 @@ class ScriptEditor(QDialog):
             mask_name = os.path.splitext(os.path.basename(path))[0] + "_mask.tif"
             mask_path = os.path.join(save_folder, mask_name)
             self.controller.model.create_blank_masks(mask_path)
-            self._run_stack_range(0, self.controller.model.n_slices - 1)
+            start = min(start_idx, self.controller.model.n_slices - 1)
+            self._run_stack_range(start, self.controller.model.n_slices - 1)
             if self._stopped:
                 break
         QMessageBox.information(self, "Run Stacks", "Batch segmentation complete")
