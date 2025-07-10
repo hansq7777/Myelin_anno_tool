@@ -11,7 +11,6 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QLabel,
     QSpinBox,
-    QComboBox,
     QMessageBox,
 )
 from PyQt5.QtCore import Qt, QEvent, QPoint, QThread, pyqtSignal
@@ -190,17 +189,16 @@ class MainController(QMainWindow):
         self.blur_spin.setValue(1)
         self.show_orig_chk = QCheckBox("Show Original")
         self.show_orig_chk.toggled.connect(self._toggle_original)
-        self.opacity_combo = QComboBox()
-        for pct in (0, 25, 50, 75, 100):
-            self.opacity_combo.addItem(f"{pct}%", pct)
-        self.opacity_combo.setCurrentIndex(2)
-        self.opacity_combo.currentIndexChanged.connect(self._change_opacity)
+        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setRange(0, 100)
+        self.opacity_slider.setValue(50)
+        self.opacity_slider.valueChanged.connect(self._change_opacity)
         self.clear_blur_btn = QPushButton("Clear Blur")
         self.clear_blur_btn.clicked.connect(self._clear_blur)
         blur_layout.addWidget(self.blur_btn)
         blur_layout.addWidget(self.blur_spin)
         blur_layout.addWidget(self.show_orig_chk)
-        blur_layout.addWidget(self.opacity_combo)
+        blur_layout.addWidget(self.opacity_slider)
         blur_layout.addWidget(self.clear_blur_btn)
         ctrl.addLayout(blur_layout)
 
@@ -566,9 +564,11 @@ class MainController(QMainWindow):
         self._update_view()
 
     def _change_opacity(self) -> None:
-        value = self.opacity_combo.currentData()
-        if value is None:
-            return
+        value = (
+            self.opacity_slider.value()
+            if hasattr(self, "opacity_slider")
+            else 50
+        )
         self.canvas.set_mask_opacity(value / 100.0)
         # refresh current mask to apply new opacity
         mask = self.model.get_mask() if self.model.masks is not None else None
@@ -954,7 +954,7 @@ class MainController(QMainWindow):
             "  Stretch % + Stretch - histogram stretch (0 resets to original)\n"
             "  Blur + Blur value - apply Gaussian blur with given sigma\n"
             "  Show Original - toggle display of the unblurred image\n"
-            "  Opacity - mask overlay transparency\n"
+            "  Opacity Slider - mask overlay transparency\n"
             "  Clear Blur - restore the image without blur\n"
             "  Seed % + Seed - create mask seeds above intensity percentile\n"
             "  Diff %/Hist % + Int Grow - expand mask using intensity difference and optional histogram cutoff\n"
