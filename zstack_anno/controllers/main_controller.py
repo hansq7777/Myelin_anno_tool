@@ -120,22 +120,24 @@ class MainController(QMainWindow):
         self.title_label = QLabel("Z-Stack Annotation")
         self.title_label.setAlignment(Qt.AlignHCenter)
         layout.addWidget(self.title_label)
-        layout.addWidget(self.canvas)
-        # -------- Controls --------
-        ctrl = QHBoxLayout()
 
-        nav_layout = QVBoxLayout()
+        # Navigation controls placed prominently below the title
+        nav_layout = QHBoxLayout()
         self.prev_btn = QPushButton("Prev")
         self.prev_btn.clicked.connect(self._prev_slice)
-        self.next_btn = QPushButton("Next")
-        self.next_btn.clicked.connect(self._next_slice)
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setEnabled(False)
         self.slider.valueChanged.connect(self._on_slice_changed)
+        self.next_btn = QPushButton("Next")
+        self.next_btn.clicked.connect(self._next_slice)
         nav_layout.addWidget(self.prev_btn)
         nav_layout.addWidget(self.slider)
         nav_layout.addWidget(self.next_btn)
-        ctrl.addLayout(nav_layout)
+        layout.addLayout(nav_layout)
+
+        layout.addWidget(self.canvas)
+        # -------- Controls --------
+        ctrl = QHBoxLayout()
 
         morph_layout = QVBoxLayout()
         self.dilate_btn = QPushButton("Dilate")
