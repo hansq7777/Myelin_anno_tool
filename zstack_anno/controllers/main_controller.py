@@ -686,7 +686,7 @@ class MainController(QMainWindow):
         except ValueError:
             pct = 90.0
         self._push_undo("seed")
-        img = self.model.get_current()
+        img = self.model.get_original_slice()
         cur = self.model.get_mask()
         seeds = morphology_tools.sample_seeds(img, pct, num_seeds=20000)
         cur = cur.copy()
@@ -707,7 +707,7 @@ class MainController(QMainWindow):
         except ValueError:
             hist_pct = None
         self._push_undo("int_grow")
-        img = self.model.get_current()
+        img = self.model.get_original_slice()
         cur = self.model.get_mask()
         self.cancel_event.clear()
         self.cancel_btn.setEnabled(True)
@@ -807,7 +807,7 @@ class MainController(QMainWindow):
         if not self._ensure_masks():
             return
         self._push_undo("seed")
-        img = self.model.get_current()
+        img = self.model.get_original_slice()
         cur = self.model.get_mask()
         seeds = morphology_tools.sample_seeds(img, percentile, num_seeds=20000)
         cur = cur.copy()
@@ -825,7 +825,7 @@ class MainController(QMainWindow):
         if not self._ensure_masks():
             return
         self._push_undo("int_grow")
-        img = self.model.get_current()
+        img = self.model.get_original_slice()
         cur = self.model.get_mask()
         self._next_progress = 0.2
         grown = morphology_tools.intensity_region_grow(
@@ -847,7 +847,7 @@ class MainController(QMainWindow):
         if not self._ensure_masks():
             return
         self._push_undo("flood_grow")
-        img = self.model.get_current()
+        img = self.model.get_original_slice()
         cur = self.model.get_mask()
         self._next_progress = 0.2
         grown = morphology_tools.flood_region_grow(

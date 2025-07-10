@@ -145,6 +145,16 @@ class ZStackModel:
             return self.data_before_blur[self.index]
         return self.data[self.index]
 
+    def get_original_slice(self, slice_idx: int | None = None) -> np.ndarray:
+        """Return slice from ``original_data`` falling back to ``data``."""
+        if slice_idx is None:
+            slice_idx = self.index
+        if self.original_data is not None:
+            return self.original_data[slice_idx]
+        if self.data is None:
+            raise RuntimeError("Image not loaded")
+        return self.data[slice_idx]
+
     def total_pixel_count(self) -> int:
         """Return number of foreground pixels across all masks."""
         if self.masks is None:
@@ -238,16 +248,20 @@ class ZStackModel:
         progress_fn: Callable | None = None,
     ) -> None:
         """Remove low intensity pixels from the mask on ``slice_idx``."""
-        if self.data is None or self.masks is None:
+        if (self.data is None and self.original_data is None) or self.masks is None:
             return
         if slice_idx is None:
             slice_idx = self.index
-        img = self.data[slice_idx]
+        img = self.get_original_slice(slice_idx)
         mask = self.masks[slice_idx]
 
         global_thresh = None
         if bins and bins > 0:
-            values = self.data[self.masks > 0]
+            values = (
+                self.original_data[self.masks > 0]
+                if self.original_data is not None
+                else self.data[self.masks > 0]
+            )
             if values.size > 0:
                 hist, edges = np.histogram(values, bins=256)
                 idx = min(bins, len(edges) - 2)
@@ -265,11 +279,11 @@ class ZStackModel:
 
     def threshold_absolute(self, value: float, slice_idx: int | None = None) -> None:
         """Mark pixels above ``value`` without altering existing foreground."""
-        if self.data is None:
+        if self.data is None and self.original_data is None:
             return
         if slice_idx is None:
             slice_idx = self.index
-        slice_ = self.data[slice_idx]
+        slice_ = self.get_original_slice(slice_idx)
         thresh_mask = threshold_absolute(slice_, value)
         if self.masks is None:
             mask = thresh_mask
@@ -280,11 +294,11 @@ class ZStackModel:
 
     def threshold_normalized(self, percent: float, slice_idx: int | None = None) -> None:
         """Threshold slice by normalized percentage without removing labels."""
-        if self.data is None:
+        if self.data is None and self.original_data is None:
             return
         if slice_idx is None:
             slice_idx = self.index
-        slice_ = self.data[slice_idx]
+        slice_ = self.get_original_slice(slice_idx)
         thresh_mask = threshold_normalized(slice_, percent)
         if self.masks is None:
             mask = thresh_mask

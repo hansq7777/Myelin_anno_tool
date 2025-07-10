@@ -193,17 +193,16 @@ def label_components(mask: np.ndarray) -> np.ndarray:
                 labels[y, x] = current
                 while stack:
                     cy, cx = stack.pop()
-                    for dy in (-1, 0, 1):
-                        for dx in (-1, 0, 1):
-                            ny, nx = cy + dy, cx + dx
-                            if (
-                                0 <= ny < h
-                                and 0 <= nx < w
-                                and mask[ny, nx]
-                                and labels[ny, nx] == 0
-                            ):
-                                labels[ny, nx] = current
-                                stack.append((ny, nx))
+                    for dy, dx in ((-1,0),(1,0),(0,-1),(0,1)):
+                        ny, nx = cy + dy, cx + dx
+                        if (
+                            0 <= ny < h
+                            and 0 <= nx < w
+                            and mask[ny, nx]
+                            and labels[ny, nx] == 0
+                        ):
+                            labels[ny, nx] = current
+                            stack.append((ny, nx))
     return labels
 
 
@@ -646,8 +645,35 @@ def flood_region_grow(
     is returned.
     """
 
-    if flood is None:  # pragma: no cover - scikit-image may be unavailable
-        raise RuntimeError("skimage.segmentation.flood is unavailable")
+    def _flood_fallback(seed: tuple[int, int]) -> np.ndarray:
+        """Simple flood fill using NumPy when skimage is unavailable."""
+        h, w = slice_.shape
+        result = np.zeros_like(mask, dtype=bool)
+        seed_val = slice_[seed]
+        stack = [seed]
+        result[seed] = True
+        if connectivity > 1:
+            offsets = [
+                (-1, 0),
+                (1, 0),
+                (0, -1),
+                (0, 1),
+                (-1, -1),
+                (-1, 1),
+                (1, -1),
+                (1, 1),
+            ]
+        else:
+            offsets = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        while stack:
+            cy, cx = stack.pop()
+            for dy, dx in offsets:
+                ny, nx = cy + dy, cx + dx
+                if 0 <= ny < h and 0 <= nx < w and not result[ny, nx]:
+                    if abs(float(slice_[ny, nx]) - float(seed_val)) <= tolerance:
+                        result[ny, nx] = True
+                        stack.append((ny, nx))
+        return result
 
     labels = label_components(mask)
     unique = np.unique(labels)
@@ -659,7 +685,9 @@ def flood_region_grow(
         if not np.any(region):
             return None
         seed = tuple(np.argwhere(region)[0])
-        return flood(slice_, seed, connectivity=connectivity, tolerance=tolerance)
+        if flood is not None:
+            return flood(slice_, seed, connectivity=connectivity, tolerance=tolerance)
+        return _flood_fallback(seed)
 
     total = len(unique)
     if progress:
