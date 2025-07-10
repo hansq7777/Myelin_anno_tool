@@ -224,6 +224,12 @@ class MainController(QMainWindow):
         blur_layout.addWidget(self.clear_blur_btn)
         ctrl.addLayout(blur_layout)
 
+        res_layout = QVBoxLayout()
+        self.resample_btn = QPushButton("Resample")
+        self.resample_btn.clicked.connect(self._resample_stack)
+        res_layout.addWidget(self.resample_btn)
+        ctrl.addLayout(res_layout)
+
         grow_layout = QVBoxLayout()
         self.seed_thresh_edit = QLineEdit()
         self.seed_thresh_edit.setPlaceholderText("Seed %")
@@ -315,6 +321,8 @@ class MainController(QMainWindow):
         self.show_orig_act.setChecked(self.show_orig_chk.isChecked())
         clear_blur_act = image_menu.addAction("Clear Blur")
         clear_blur_act.triggered.connect(self._clear_blur)
+        resample_act = image_menu.addAction("Resample…")
+        resample_act.triggered.connect(self._resample_stack)
 
         tool_menu = self.menuBar().addMenu("Tools")
         script_act = tool_menu.addAction("Script Editor")
@@ -677,6 +685,40 @@ class MainController(QMainWindow):
         self.model.remove_gaussian_blur()
         # do not reset the view when clearing blur
         self._update_view()
+
+    def _resample_stack(self) -> None:
+        """Prompt for new pixel sizes and save a resampled copy."""
+        if self.model.data is None:
+            return
+        sizes = self.model.get_pixel_sizes()
+        if sizes is None:
+            QMessageBox.warning(
+                self, "Resample", "Pixel size information not found in metadata"
+            )
+            return
+        x, ok = QInputDialog.getDouble(
+            self, "New X size", "PhysicalSizeX", sizes[0], 0.000001, 1e6, 6
+        )
+        if not ok:
+            return
+        y, ok = QInputDialog.getDouble(
+            self, "New Y size", "PhysicalSizeY", sizes[1], 0.000001, 1e6, 6
+        )
+        if not ok:
+            return
+        z, ok = QInputDialog.getDouble(
+            self, "New Z size", "PhysicalSizeZ", sizes[2], 0.000001, 1e6, 6
+        )
+        if not ok:
+            return
+        folder = QFileDialog.getExistingDirectory(self, "Select Save Folder")
+        if not folder:
+            return
+        base = os.path.splitext(os.path.basename(self.model.path))[0]
+        name = f"{base}_x{x}_y{y}_z{z}.tif"
+        path = os.path.join(folder, name)
+        self.model.save_resampled_stack(path, x, y, z)
+        QMessageBox.information(self, "Resample", f"Saved to {path}")
 
     def _seed_current(self) -> None:
         if not self._ensure_masks():

@@ -2,6 +2,8 @@ import os
 from typing import Callable
 import tifffile
 import numpy as np
+from xml.etree import ElementTree as ET
+from scipy.ndimage import zoom
 from ..utils.morphology_tools import (
     label_components,
     histogram_stretch_stack,
@@ -349,3 +351,53 @@ class ZStackModel:
         if self.data is None:
             raise RuntimeError("No image loaded")
         tifffile.imwrite(path, self.data, ome=self.ome_metadata)
+
+    # ----- resolution helpers -----
+    def get_pixel_sizes(self) -> tuple[float, float, float] | None:
+        """Return physical pixel sizes (X, Y, Z) from OME metadata."""
+        if not self.ome_metadata:
+            return None
+        try:
+            root = ET.fromstring(self.ome_metadata)
+            pixels = root.find('.//Pixels')
+            if pixels is None:
+                return None
+            x = float(pixels.attrib.get('PhysicalSizeX', '1'))
+            y = float(pixels.attrib.get('PhysicalSizeY', '1'))
+            z = float(pixels.attrib.get('PhysicalSizeZ', '1'))
+            return (x, y, z)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _update_pixel_sizes(
+        ome_xml: str | None, x: float, y: float, z: float
+    ) -> str | None:
+        if ome_xml is None:
+            return None
+        try:
+            root = ET.fromstring(ome_xml)
+            pixels = root.find('.//Pixels')
+            if pixels is not None:
+                pixels.set('PhysicalSizeX', str(x))
+                pixels.set('PhysicalSizeY', str(y))
+                pixels.set('PhysicalSizeZ', str(z))
+            return ET.tostring(root, encoding='unicode')
+        except Exception:
+            return ome_xml
+
+    def save_resampled_stack(
+        self, path: str, x: float, y: float, z: float
+    ) -> None:
+        """Save a resampled copy of the stack with new pixel sizes."""
+        if self.data is None:
+            raise RuntimeError("No image loaded")
+        current = self.get_pixel_sizes()
+        if current is None:
+            raise RuntimeError("Pixel size info missing in metadata")
+        sx = current[0] / x
+        sy = current[1] / y
+        sz = current[2] / z
+        new_stack = zoom(self.data, (sz, sy, sx), order=1)
+        ome_xml = self._update_pixel_sizes(self.ome_metadata, x, y, z)
+        tifffile.imwrite(path, new_stack, ome=ome_xml)
