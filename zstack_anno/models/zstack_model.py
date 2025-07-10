@@ -46,8 +46,10 @@ class ZStackModel:
         if arr.ndim != 3:
             raise ValueError("Only 3-D stacks are supported")
 
+        # Keep a single copy of the loaded data until modifications are needed
+        self.original_data = arr
+        # ``data`` initially references the same array to avoid an immediate copy
         self.data = arr
-        self.original_data = arr.copy()
         self.index = 0
         self.masks = None
         self.components = None
