@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from ..utils import config
 from PyQt5.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -195,6 +196,10 @@ class ScriptEditor(QDialog):
         self.step_list.itemDoubleClicked.connect(self.edit_step)
         self.action_list.itemDoubleClicked.connect(self.add_action_item)
 
+        stored = config.get("script", [])
+        if isinstance(stored, list):
+            self.set_script(stored)
+
     def add_step(
         self, action: str, params: dict | None = None, prompt: bool = False
     ) -> QListWidgetItem:
@@ -218,6 +223,7 @@ class ScriptEditor(QDialog):
         item.setSizeHint(widget.sizeHint())
         self.step_list.addItem(item)
         self.step_list.setItemWidget(item, widget)
+        self._save_to_config()
         return item
 
     def get_default_step(self, action: str) -> dict:
@@ -247,6 +253,7 @@ class ScriptEditor(QDialog):
         data["params"] = params
         item.setData(Qt.UserRole, data)
         item.setText(self.format_step(data))
+        self._save_to_config()
 
     def run_script(self) -> float:
         """Run the configured steps once and return the elapsed time."""
@@ -313,6 +320,7 @@ class ScriptEditor(QDialog):
         ]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(steps, f, indent=2)
+        self._save_to_config()
 
     def load_script(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -333,6 +341,7 @@ class ScriptEditor(QDialog):
             if not action:
                 continue
             self.add_step(action, step.get("params", {}))
+        self._save_to_config()
 
     def add_selected_action(self) -> None:
         """Add the currently selected action from the action list."""
@@ -354,6 +363,7 @@ class ScriptEditor(QDialog):
         row = self.step_list.currentRow()
         if row >= 0:
             self.step_list.takeItem(row)
+            self._save_to_config()
 
     def stop_script(self) -> None:
         """Stop execution after the current action."""
@@ -524,3 +534,27 @@ class ScriptEditor(QDialog):
             if self._stopped:
                 break
         QMessageBox.information(self, "Run Stacks", "Batch segmentation complete")
+
+    # -------- persistence helpers ---------
+    def get_script(self) -> list[dict]:
+        steps = []
+        for i in range(self.step_list.count()):
+            data = self.step_list.item(i).data(Qt.UserRole)
+            if isinstance(data, dict):
+                steps.append(data)
+        return steps
+
+    def set_script(self, steps: list[dict]) -> None:
+        self.step_list.clear()
+        for step in steps:
+            action = step.get("action")
+            if not action:
+                continue
+            self.add_step(action, step.get("params", {}))
+
+    def _save_to_config(self) -> None:
+        config.set("script", self.get_script())
+
+    def closeEvent(self, event) -> None:
+        self._save_to_config()
+        super().closeEvent(event)
