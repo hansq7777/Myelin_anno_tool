@@ -420,6 +420,7 @@ class MainController(QMainWindow):
 
     def closeEvent(self, event):
         if self._prompt_save_if_dirty():
+            config.save()
             super().closeEvent(event)
         else:
             event.ignore()

@@ -36,4 +36,3 @@ def get(key: str, default=None):
 
 def set(key: str, value) -> None:
     _config[key] = value
-    save()

@@ -559,4 +559,5 @@ class ScriptEditor(QDialog):
 
     def closeEvent(self, event) -> None:
         self._save_to_config()
+        config.save()
         super().closeEvent(event)
