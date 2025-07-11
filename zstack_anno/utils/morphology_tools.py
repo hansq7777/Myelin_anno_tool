@@ -8,10 +8,13 @@ from typing import Callable
 logger = logging.getLogger(__name__)
 
 try:
-    from skimage.morphology import binary_dilation as sk_binary_dilation
-    from skimage.morphology import binary_erosion as sk_binary_erosion
-    from skimage.morphology import remove_small_objects
-    from skimage.morphology import skeletonize, skeletonize_3d, medial_axis
+    from skimage.morphology import (
+        binary_dilation as sk_binary_dilation,
+        binary_erosion as sk_binary_erosion,
+        remove_small_objects,
+        skeletonize,
+        medial_axis,
+    )
     from skimage.measure import label
     from skimage.segmentation import flood
 except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
@@ -20,7 +23,6 @@ except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
     sk_binary_erosion = None  # type: ignore
     remove_small_objects = None  # type: ignore
     skeletonize = None  # type: ignore
-    skeletonize_3d = None  # type: ignore
     medial_axis = None  # type: ignore
     label = None  # type: ignore
     gaussian = None  # type: ignore
@@ -31,6 +33,22 @@ else:
     except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
         logger.warning("scikit-image.filters import failed: %s", exc)
         gaussian = None  # type: ignore
+
+skeletonize_3d = None
+
+
+def _load_skeletonize_3d() -> Callable | None:
+    """Attempt to import ``skeletonize_3d`` only when needed."""
+    global skeletonize_3d
+    if skeletonize_3d is None:
+        try:  # pragma: no cover - optional dependency
+            from skimage.morphology import skeletonize_3d as _sk_skeletonize_3d
+        except Exception as exc:
+            logger.warning("skeletonize_3d import failed: %s", exc)
+            skeletonize_3d = None
+        else:
+            skeletonize_3d = _sk_skeletonize_3d
+    return skeletonize_3d
 
 try:
     from scipy.ndimage import binary_dilation as nd_binary_dilation
@@ -793,7 +811,7 @@ def skeletonize_slice(slice_: np.ndarray, algorithm: str = "skeletonize", **kwar
 def skeletonize_stack(stack: np.ndarray, algorithm: str = "skeletonize", **kwargs) -> np.ndarray:
     """Skeletonize an entire mask stack or volume."""
     if algorithm == "skeletonize_3d":
-        if skeletonize_3d is not None:
+        if _load_skeletonize_3d() is not None:
             return skeletonize_3d(stack > 0).astype(stack.dtype)
         # fallback: apply 2D skeletonization slice by slice
         return np.stack([_skeletonize_numpy(s) for s in stack])
