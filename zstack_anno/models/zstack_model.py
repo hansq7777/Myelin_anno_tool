@@ -256,7 +256,7 @@ class ZStackModel:
             return
         if slice_idx is None:
             slice_idx = self.index
-        img = self.get_original_slice(slice_idx)
+        img = self._extract_slice(slice_idx)
         mask = self.masks[slice_idx]
 
         global_thresh = None
@@ -287,7 +287,7 @@ class ZStackModel:
             return
         if slice_idx is None:
             slice_idx = self.index
-        slice_ = self.get_original_slice(slice_idx)
+        slice_ = self._extract_slice(slice_idx)
         thresh_mask = threshold_absolute(slice_, value)
         if self.masks is None:
             mask = thresh_mask
@@ -302,7 +302,7 @@ class ZStackModel:
             return
         if slice_idx is None:
             slice_idx = self.index
-        slice_ = self.get_original_slice(slice_idx)
+        slice_ = self._extract_slice(slice_idx)
         thresh_mask = threshold_normalized(slice_, percent)
         if self.masks is None:
             mask = thresh_mask

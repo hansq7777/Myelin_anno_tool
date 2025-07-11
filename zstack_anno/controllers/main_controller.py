@@ -729,7 +729,7 @@ class MainController(QMainWindow):
         except ValueError:
             pct = 90.0
         self._push_undo("seed")
-        img = self.model.get_original_slice()
+        img = self.model._extract_slice(self.model.index)
         cur = self.model.get_mask()
         seeds = morphology_tools.sample_seeds(img, pct, num_seeds=20000)
         cur = cur.copy()
@@ -750,7 +750,7 @@ class MainController(QMainWindow):
         except ValueError:
             hist_pct = None
         self._push_undo("int_grow")
-        img = self.model.get_original_slice()
+        img = self.model._extract_slice(self.model.index)
         cur = self.model.get_mask()
         self.cancel_event.clear()
         self.cancel_btn.setEnabled(True)
@@ -850,7 +850,7 @@ class MainController(QMainWindow):
         if not self._ensure_masks():
             return
         self._push_undo("seed")
-        img = self.model.get_original_slice()
+        img = self.model._extract_slice(self.model.index)
         cur = self.model.get_mask()
         seeds = morphology_tools.sample_seeds(img, percentile, num_seeds=20000)
         cur = cur.copy()
@@ -868,7 +868,7 @@ class MainController(QMainWindow):
         if not self._ensure_masks():
             return
         self._push_undo("int_grow")
-        img = self.model.get_original_slice()
+        img = self.model._extract_slice(self.model.index)
         cur = self.model.get_mask()
         self._next_progress = 0.2
         grown = morphology_tools.intensity_region_grow(
@@ -890,7 +890,7 @@ class MainController(QMainWindow):
         if not self._ensure_masks():
             return
         self._push_undo("flood_grow")
-        img = self.model.get_original_slice()
+        img = self.model._extract_slice(self.model.index)
         cur = self.model.get_mask()
         self._next_progress = 0.2
         grown = morphology_tools.flood_region_grow(
@@ -913,6 +913,15 @@ class MainController(QMainWindow):
 
     def script_clear_blur(self) -> None:
         self.model.remove_gaussian_blur()
+        self._update_view()
+
+    def script_stretch(self, percentile: float = 0.0) -> None:
+        if self.model.data is None:
+            return
+        if percentile <= 0:
+            self.model.reset_contrast()
+        else:
+            self.model.histogram_stretch(percentile)
         self._update_view()
 
     def script_bg_filter(self, percentile: float = 0.0, bins: int = 0) -> None:

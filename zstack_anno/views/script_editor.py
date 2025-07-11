@@ -139,6 +139,7 @@ class ScriptEditor(QDialog):
             "method": "script_bg_filter",
             "params": {"percentile": 10.0, "bins": 0},
         },
+        "Histogram Stretch": {"method": "script_stretch", "params": {"percentile": 0.0}},
         "Gaussian Blur": {"method": "script_blur", "params": {"sigma": 1.0}},
         "Clear Blur": {"method": "script_clear_blur", "params": {}},
         "Save": {"method": "script_save", "params": {}},
