@@ -27,8 +27,8 @@ class ZStackModel:
         self.mask_path: str | None = None
         self.mask_dirty: bool = False
         self.ome_metadata: str | None = None
-        self.data_before_blur: np.ndarray | None = None
-        self.is_blurred: bool = False
+        self.blur_sigma: float = 0.0
+        self.stretch_percent: float = 0.0
         self.show_original: bool = False
 
     def load(self, path: str) -> None:
@@ -56,6 +56,9 @@ class ZStackModel:
         self.path = path
         self.mask_path = None
         self.mask_dirty = False
+        self.blur_sigma = 0.0
+        self.stretch_percent = 0.0
+        self.show_original = False
 
     def load_masks(self, path: str) -> None:
         """Load mask stack from a TIFF file."""
@@ -145,8 +148,8 @@ class ZStackModel:
     def get_current(self) -> np.ndarray:
         if self.data is None:
             raise RuntimeError("No image loaded")
-        if self.show_original and self.data_before_blur is not None:
-            return self.data_before_blur[self.index]
+        if self.show_original and self.original_data is not None:
+            return self.original_data[self.index]
         return self.data[self.index]
 
     def get_original_slice(self, slice_idx: int | None = None) -> np.ndarray:
@@ -184,6 +187,17 @@ class ZStackModel:
             raise ValueError("slice index out of range")
         return self.data[idx]
 
+    def _recompute_image(self) -> None:
+        """Recompute ``data`` from ``original_data`` using blur and stretch."""
+        if self.original_data is None:
+            return
+        img = self.original_data
+        if self.blur_sigma > 0:
+            img = gaussian_blur_stack(img, self.blur_sigma)
+        if self.stretch_percent > 0:
+            img = histogram_stretch_stack(img, self.stretch_percent)
+        self.data = img
+
     @staticmethod
     def _normalize_to_8bit(arr: np.ndarray) -> np.ndarray:
         """Normalize array to uint8 range."""
@@ -197,48 +211,36 @@ class ZStackModel:
 
     # --------- image utilities ---------
     def histogram_stretch(self, percentile: float) -> None:
-        """Apply histogram stretch to the entire stack.
-
-        The adjustment is always computed from ``original_data`` so calling this
-        method multiple times with different ``percentile`` values will reapply
-        the stretch from the unmodified image instead of compounding the effect.
-        """
+        """Apply histogram stretch to the processed image stack."""
         if self.original_data is None:
             raise RuntimeError("Image not loaded")
-        self.data = histogram_stretch_stack(self.original_data, percentile)
+        self.stretch_percent = percentile
+        self._recompute_image()
 
     def reset_contrast(self) -> None:
         """Revert ``data`` to the original loaded image."""
         if self.original_data is not None:
-            self.data = self.original_data.copy()
+            self.stretch_percent = 0.0
+            self._recompute_image()
 
     def apply_gaussian_blur(self, sigma: float) -> None:
-        """Apply Gaussian blur to the image stack for processing.
-
-        On the first call, the current ``data`` is cached and all subsequent
-        blurs operate on this cached copy.  This means that changing ``sigma``
-        re-blurs the original image instead of blurring an already blurred one.
-        """
-        if self.data is None:
+        """Apply Gaussian blur to the image stack for processing."""
+        if self.original_data is None:
             return
-        if not self.is_blurred:
-            self.data_before_blur = self.data.copy()
-        self.data = gaussian_blur_stack(self.data_before_blur, sigma)
-        self.is_blurred = True
+        self.blur_sigma = sigma
+        self._recompute_image()
 
     def remove_gaussian_blur(self) -> None:
         """Restore the image stack to the state before blurring."""
-        if not self.is_blurred:
+        if self.blur_sigma == 0.0:
             return
-        if self.data_before_blur is not None:
-            self.data = self.data_before_blur
-        self.data_before_blur = None
-        self.is_blurred = False
+        self.blur_sigma = 0.0
         self.show_original = False
+        self._recompute_image()
 
     def toggle_show_original(self) -> None:
         """Toggle display between blurred and original image."""
-        if not self.is_blurred:
+        if self.blur_sigma == 0.0:
             return
         self.show_original = not self.show_original
 
@@ -261,11 +263,7 @@ class ZStackModel:
 
         global_thresh = None
         if bins and bins > 0:
-            values = (
-                self.original_data[self.masks > 0]
-                if self.original_data is not None
-                else self.data[self.masks > 0]
-            )
+            values = self.data[self.masks > 0] if self.data is not None else np.array([])
             if values.size > 0:
                 hist, edges = np.histogram(values, bins=256)
                 idx = min(bins, len(edges) - 2)
