@@ -235,12 +235,11 @@ class ZStackModel:
         if self.blur_sigma == 0.0:
             return
         self.blur_sigma = 0.0
-        self.show_original = False
         self._recompute_image()
 
     def toggle_show_original(self) -> None:
-        """Toggle display between blurred and original image."""
-        if self.blur_sigma == 0.0:
+        """Toggle display between processed and original image."""
+        if self.original_data is None:
             return
         self.show_original = not self.show_original
 

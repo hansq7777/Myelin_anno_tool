@@ -12,6 +12,9 @@ class SliceCanvas(QGraphicsView):
         self.setScene(QGraphicsScene())
         # 启用拖拽平移
         self.setDragMode(self.ScrollHandDrag)
+        # 启用鼠标移动追踪以显示像素信息
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
 
         self._image_item = None
         self._mask_item = None
