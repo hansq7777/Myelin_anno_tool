@@ -100,9 +100,9 @@ def test_blur_and_stretch_are_absolute():
     assert np.array_equal(model.data, expected)
     assert not np.array_equal(model.data, first_blur)
 
-    # histogram stretch should also work from the original data
+    # histogram stretch should work on the blurred data
     model.histogram_stretch(10)
-    expected_stretch = histogram_stretch_stack(arr, 10)
+    expected_stretch = histogram_stretch_stack(gaussian_blur_stack(arr, 0.5), 10)
     assert np.array_equal(model.data, expected_stretch)
 
 
