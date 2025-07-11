@@ -254,6 +254,9 @@ class MainController(QMainWindow):
 
         self.info_label = QLabel("")
         ctrl.addWidget(self.info_label)
+        # Label to show current cursor position and pixel value
+        self.cursor_label = QLabel("")
+        ctrl.addWidget(self.cursor_label)
         layout.addLayout(ctrl)
         self.setCentralWidget(central)
 
@@ -454,6 +457,21 @@ class MainController(QMainWindow):
         if hasattr(self, "info_label"):
             self.info_label.setText(info)
         self._update_file_labels()
+
+    def _update_cursor_label(self, pos) -> None:
+        """Update cursor position and pixel value label."""
+        if self.model.data is None or self.model.original_data is None:
+            self.cursor_label.setText("")
+            return
+        scene_pos = self.canvas.mapToScene(pos)
+        x = int(scene_pos.x())
+        y = int(scene_pos.y())
+        img = self.model.get_original_slice()
+        if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
+            val = int(img[y, x])
+            self.cursor_label.setText(f"Pos: ({x}, {y})  Value: {val}")
+        else:
+            self.cursor_label.setText("")
 
     def _progress_update(self, cur: int, total: int, mask: np.ndarray | None = None) -> None:
         if mask is None or total == 0:
@@ -976,6 +994,8 @@ class MainController(QMainWindow):
         if event.type() == QEvent.KeyPress:
             self._handle_key(event)
             return True
+        if obj in (self.canvas, self.canvas.viewport()) and event.type() == QEvent.MouseMove:
+            self._update_cursor_label(event.pos())
         if (
             self.brush_enabled
             and obj in (self.canvas, self.canvas.viewport())
