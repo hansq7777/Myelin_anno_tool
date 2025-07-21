@@ -166,11 +166,14 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.opacity_slider.valueChanged.connect(self._change_opacity)
         self.clear_blur_btn = QPushButton("Clear Blur")
         self.clear_blur_btn.clicked.connect(self._clear_blur)
+        self.reverse_btn = QPushButton("Reverse")
+        self.reverse_btn.clicked.connect(self._reverse_image)
         blur_layout.addWidget(self.blur_btn)
         blur_layout.addWidget(self.blur_spin)
         blur_layout.addWidget(self.show_orig_chk)
         blur_layout.addWidget(self.opacity_slider)
         blur_layout.addWidget(self.clear_blur_btn)
+        blur_layout.addWidget(self.reverse_btn)
         ctrl.addLayout(blur_layout)
 
         res_layout = QVBoxLayout()
@@ -276,6 +279,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.show_orig_act.setChecked(self.show_orig_chk.isChecked())
         clear_blur_act = image_menu.addAction("Clear Blur")
         clear_blur_act.triggered.connect(self._clear_blur)
+        reverse_act = image_menu.addAction("Reverse Intensities")
+        reverse_act.triggered.connect(self._reverse_image)
         resample_act = image_menu.addAction("Resample…")
         resample_act.triggered.connect(self._resample_stack)
 
@@ -639,6 +644,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             "  Show Original - toggle display of the unblurred image\n"
             "  Opacity Slider - mask overlay transparency\n"
             "  Clear Blur - restore the image without blur\n"
+            "  Reverse - invert pixel intensities\n"
             "  Seed % + Seed - create mask seeds above intensity percentile\n"
             "  Diff %/Hist % + Int Grow - expand mask using intensity difference and optional histogram cutoff\n"
             "  Conn/Tol + Flood Grow - expand mask using flood fill with connectivity and tolerance\n"

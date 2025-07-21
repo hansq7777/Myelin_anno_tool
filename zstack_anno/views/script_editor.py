@@ -175,6 +175,7 @@ class ScriptEditor(QDialog):
         "Histogram Stretch": {"method": "script_stretch", "params": {"percentile": 0.0}},
         "Gaussian Blur": {"method": "script_blur", "params": {"sigma": 1.0}},
         "Clear Blur": {"method": "script_clear_blur", "params": {}},
+        "Reverse Intensities": {"method": "script_reverse_image", "params": {}},
         "Check Segment": {
             "method": "script_check_segment",
             "params": {"percentile": 5.0, "continuous": True},

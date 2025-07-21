@@ -197,6 +197,10 @@ class MorphologyMixin:
         self.model.remove_gaussian_blur()
         self._update_view()
 
+    def _reverse_image(self: 'MainController') -> None:
+        self.model.toggle_reverse_intensity()
+        self._update_view()
+
     def _resample_stack(self: 'MainController') -> None:
         if self.model.data is None:
             return

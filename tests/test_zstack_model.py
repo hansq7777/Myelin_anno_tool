@@ -147,3 +147,17 @@ def test_strategy_runner_skip_on_check_segment():
     assert result is False
     assert model.index == 1
     assert np.array_equal(model.get_mask(0), np.zeros((10, 10), dtype=np.uint8))
+
+
+def test_toggle_reverse_intensity():
+    model = ZStackModel()
+    arr = np.array([[[0, 1], [2, 3]]], dtype=np.uint8)
+    model.data = arr.copy()
+    model.original_data = arr.copy()
+
+    model.toggle_reverse_intensity()
+    expected = arr.max() - arr
+    assert np.array_equal(model.data, expected)
+
+    model.toggle_reverse_intensity()
+    assert np.array_equal(model.data, arr)
