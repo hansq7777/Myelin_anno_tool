@@ -29,10 +29,13 @@ except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
     flood = None  # type: ignore
 else:
     try:
-        from skimage.filters import gaussian
+        from skimage.filters import gaussian, frangi, sato, meijering
     except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
         logger.warning("scikit-image.filters import failed: %s", exc)
         gaussian = None  # type: ignore
+        frangi = None  # type: ignore
+        sato = None  # type: ignore
+        meijering = None  # type: ignore
 
 skeletonize_3d = None
 
@@ -802,6 +805,13 @@ def skeletonize_slice(slice_: np.ndarray, algorithm: str = "skeletonize", **kwar
             if isinstance(result, tuple):
                 result = result[0]
             return result.astype(slice_.dtype)
+    elif algorithm == "thin":
+        try:
+            from skimage.morphology import thin
+        except Exception as exc:  # pragma: no cover - optional dependency
+            logger.warning("thin import failed: %s", exc)
+        else:
+            return thin(img).astype(slice_.dtype)
     else:
         if skeletonize is not None:
             return skeletonize(img).astype(slice_.dtype)
@@ -828,5 +838,53 @@ def _neighbor_count(arr: np.ndarray) -> np.ndarray:
                 continue
             count += padded[1 + dy : 1 + dy + h, 1 + dx : 1 + dx + w]
     return count
+
+
+def frangi_filter_slice(slice_: np.ndarray, sigmas=(1, 2, 3)) -> np.ndarray:
+    """Enhance line structures using the Frangi vesselness filter."""
+    if frangi is None:  # pragma: no cover - optional dependency
+        return slice_.astype(float)
+    return frangi(slice_.astype(float), sigmas=sigmas)
+
+
+def sato_filter_slice(slice_: np.ndarray, sigmas=(1, 2, 3)) -> np.ndarray:
+    """Enhance line structures using the Sato tubeness filter."""
+    if sato is None:  # pragma: no cover - optional dependency
+        return slice_.astype(float)
+    return sato(slice_.astype(float), sigmas=sigmas)
+
+
+def meijering_filter_slice(slice_: np.ndarray, sigmas=(1, 2, 3)) -> np.ndarray:
+    """Enhance line structures using the Meijering neuriteness filter."""
+    if meijering is None:  # pragma: no cover - optional dependency
+        return slice_.astype(float)
+    return meijering(slice_.astype(float), sigmas=sigmas)
+
+
+def thin_slice(slice_: np.ndarray) -> np.ndarray:
+    """Perform morphological thinning preserving topology."""
+    try:
+        from skimage.morphology import thin
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("thin import failed: %s", exc)
+        return skeletonize_slice(slice_)
+    return thin(slice_ > 0).astype(slice_.dtype)
+
+
+def shortest_path_slice(
+    image: np.ndarray, start: tuple[int, int], end: tuple[int, int]
+) -> np.ndarray:
+    """Compute minimal cost path between ``start`` and ``end`` on ``image``."""
+    try:
+        from skimage.graph import route_through_array
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("graph import failed: %s", exc)
+        return np.zeros_like(image, dtype=np.uint8)
+    cost = 1.0 / (image.astype(float) + 1e-6)
+    coords, _ = route_through_array(cost, start, end, fully_connected=True)
+    result = np.zeros_like(image, dtype=np.uint8)
+    for y, x in coords:
+        result[int(y), int(x)] = 1
+    return result
 
 
