@@ -145,6 +145,12 @@ class ScriptMixin:
         self.model.remove_gaussian_blur()
         self._update_view()
 
+    def script_reverse_image(self: 'MainController') -> None:
+        if self.model.data is None:
+            return
+        self.model.toggle_reverse_intensity()
+        self._update_view()
+
     def script_frangi_filter(
         self: 'MainController',
         sigma_start: float = 1.0,

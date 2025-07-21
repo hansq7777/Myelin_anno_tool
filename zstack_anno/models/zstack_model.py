@@ -29,6 +29,7 @@ class ZStackModel:
         self.ome_metadata: str | None = None
         self.blur_sigma: float = 0.0
         self.stretch_percent: float = 0.0
+        self.reverse: bool = False
         self.show_original: bool = False
         # per-slice intensity stats and segmentation mask
         self._slice_intensity: np.ndarray | None = None
@@ -62,6 +63,7 @@ class ZStackModel:
         self.mask_dirty = False
         self.blur_sigma = 0.0
         self.stretch_percent = 0.0
+        self.reverse = False
         self.show_original = False
         self._slice_intensity = None
         self._seg_params = None
@@ -228,6 +230,8 @@ class ZStackModel:
         if self.original_data is None:
             return
         img = self.original_data
+        if self.reverse:
+            img = img.max() - img
         if self.blur_sigma > 0:
             img = gaussian_blur_stack(img, self.blur_sigma)
         if self.stretch_percent > 0:
@@ -278,6 +282,13 @@ class ZStackModel:
         if self.original_data is None:
             return
         self.show_original = not self.show_original
+
+    def toggle_reverse_intensity(self) -> None:
+        """Toggle display of pixel intensities reversed relative to max."""
+        if self.original_data is None:
+            return
+        self.reverse = not self.reverse
+        self._recompute_image()
 
     def remove_background(
         self,

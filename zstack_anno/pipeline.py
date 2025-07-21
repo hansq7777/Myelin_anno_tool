@@ -26,6 +26,7 @@ class StrategyRunner:
         "Histogram Stretch": "stretch",
         "Gaussian Blur": "blur",
         "Clear Blur": "clear_blur",
+        "Reverse Intensities": "reverse",
         "Check Segment": "check_segment",
         "Next Slice": "next_slice",
         "Previous Slice": "prev_slice",
@@ -106,6 +107,9 @@ class StrategyRunner:
 
     def clear_blur(self) -> None:
         self.model.remove_gaussian_blur()
+
+    def reverse(self) -> None:
+        self.model.toggle_reverse_intensity()
 
     def stretch(self, percentile: float = 0.0) -> None:
         if percentile <= 0:
