@@ -230,6 +230,15 @@ class ScriptMixin:
         self.model.remove_background(percentile, bins, progress=True, progress_fn=self._progress_update)
         self._update_view()
 
+    def script_check_segment(
+        self: 'MainController', percentile: float = 5.0, continuous: bool = True
+    ) -> bool:
+        """Return False to skip segmentation of the current slice."""
+        if self.model.data is None:
+            return False
+        mask = self.model.get_segment_mask(percentile, continuous)
+        return bool(mask[self.model.index])
+
     def script_next_slice(self: 'MainController') -> None:
         self._next_slice()
 
