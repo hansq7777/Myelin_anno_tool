@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QMessageBox,
     QApplication,
+    QMenu,
 )
 from PyQt5.QtGui import QDrag
 from PyQt5.QtCore import Qt, QMimeData
@@ -28,6 +29,8 @@ class StepListWidget(QListWidget):
         self.setAcceptDrops(True)
         # allow both internal move and external drops
         self.setDragDropMode(QListWidget.DragDrop)
+        # move items when reordering by drag and drop
+        self.setDefaultDropAction(Qt.MoveAction)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
@@ -51,6 +54,23 @@ class StepListWidget(QListWidget):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+            # save new order after internal move
+            self.parent()._save_to_config()
+
+    def contextMenuEvent(self, event):
+        item = self.itemAt(event.pos())
+        if item is None:
+            return
+        menu = QMenu(self)
+        dup_action = menu.addAction("Duplicate")
+        del_action = menu.addAction("Delete")
+        chosen = menu.exec_(self.mapToGlobal(event.pos()))
+        if chosen is dup_action:
+            self.parent().duplicate_step(item)
+        elif chosen is del_action:
+            row = self.row(item)
+            self.takeItem(row)
+            self.parent()._save_to_config()
 
 
 class ActionListWidget(QListWidget):
@@ -261,6 +281,25 @@ class ScriptEditor(QDialog):
         self.step_list.setItemWidget(item, widget)
         self._save_to_config()
         return item
+
+    def duplicate_step(self, item: QListWidgetItem) -> None:
+        """Duplicate ``item`` and insert the copy below it."""
+        data = item.data(Qt.UserRole)
+        if not isinstance(data, dict):
+            return
+        row = self.step_list.row(item)
+        new_data = {
+            "action": data.get("action"),
+            "params": data.get("params", {}).copy(),
+        }
+        new_item = QListWidgetItem()
+        widget = StepWidget(new_item, new_data["action"], new_data["params"])
+        new_item.setText("")
+        new_item.setSizeHint(widget.sizeHint())
+        self.step_list.insertItem(row + 1, new_item)
+        self.step_list.setItemWidget(new_item, widget)
+        new_item.setData(Qt.UserRole, new_data)
+        self._save_to_config()
 
     def get_default_step(self, action: str) -> dict:
         info = self.ACTIONS.get(action, {})
