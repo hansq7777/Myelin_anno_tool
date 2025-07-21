@@ -57,3 +57,4 @@ pytest
 - Right click drag – delete masks touching the selection rectangle
 - `⌘S` (macOS) / `Alt+S` (Windows) – quick save masks
 - `⌘E` or `⌥E` (macOS) / `Alt+E` (Windows) – open the Script Editor
+- `⌘D` or `⌥D` (macOS) / `Alt+D` (Windows) – clear all foreground

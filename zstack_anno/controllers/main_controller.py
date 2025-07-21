@@ -34,8 +34,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.setWindowTitle("Z-Stack Annotation (alpha)")
         self.model = ZStackModel()
         self.canvas = SliceCanvas()
-        self.undo_stack: list[tuple[np.ndarray, str]] = []
-        self.redo_stack: list[tuple[np.ndarray, str]] = []
+        self.undo_stack: list[tuple[np.ndarray | None, float, str]] = []
+        self.redo_stack: list[tuple[np.ndarray | None, float, str]] = []
         self.history: list[str] = []
         # Brush tool settings
         self.brush_enabled: bool = False
@@ -260,6 +260,9 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         seed_act.triggered.connect(self._seed_current)
         int_grow_act = mask_menu.addAction("Intensity Grow")
         int_grow_act.triggered.connect(self._grow_intensity)
+        clear_fg_act = mask_menu.addAction("Clear Foreground")
+        clear_fg_act.triggered.connect(self._clear_foreground)
+        clear_fg_act.setShortcuts(["Alt+D", "Meta+D"])
 
         image_menu = self.menuBar().addMenu("Image")
         stretch_act = image_menu.addAction("Histogram Stretch")
@@ -379,10 +382,12 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             self.model.ensure_masks()
         return True
 
-    def _push_undo(self, action: str = "") -> None:
-        if self.model.masks is None:
-            return
-        self.undo_stack.append((self.model.masks.copy(), action))
+    def _push_undo(self, action: str = "", mask: np.ndarray | None = None) -> None:
+        if mask is None and action != "stretch":
+            if self.model.masks is None:
+                return
+            mask = self.model.masks.copy()
+        self.undo_stack.append((mask, self.model.stretch_percent, action))
         self.history.append(action)
         if len(self.undo_stack) > 5:
             self.undo_stack.pop(0)
@@ -407,7 +412,10 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         ):
             self._quick_save_masks()
         elif event.key() == Qt.Key_D:
-            self._dilate_current()
+            if event.modifiers() in (Qt.AltModifier, Qt.MetaModifier):
+                self._clear_foreground()
+            else:
+                self._dilate_current()
         elif event.key() == Qt.Key_E:
             self._erode_current()
         elif event.key() == Qt.Key_Z:
@@ -438,21 +446,37 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
     def _undo(self) -> None:
         if not self.undo_stack:
             return
-        last_mask, action = self.undo_stack.pop()
-        self.redo_stack.append((self.model.masks.copy(), action))
-        self.model.masks = last_mask
+        last_mask, last_stretch, action = self.undo_stack.pop()
+        current_mask = self.model.masks.copy() if self.model.masks is not None else None
+        self.redo_stack.append((current_mask, self.model.stretch_percent, action))
+        if action == "stretch":
+            if last_stretch <= 0:
+                self.model.reset_contrast()
+            else:
+                self.model.histogram_stretch(last_stretch)
+        else:
+            if last_mask is not None:
+                self.model.masks = last_mask
         if self.history:
             self.history.pop()
-        self._update_view()
+        self._update_view(reset_view=True)
 
     def _redo(self) -> None:
         if not self.redo_stack:
             return
-        last_mask, action = self.redo_stack.pop()
-        self.undo_stack.append((self.model.masks.copy(), action))
-        self.model.masks = last_mask
+        last_mask, last_stretch, action = self.redo_stack.pop()
+        current_mask = self.model.masks.copy() if self.model.masks is not None else None
+        self.undo_stack.append((current_mask, self.model.stretch_percent, action))
+        if action == "stretch":
+            if last_stretch <= 0:
+                self.model.reset_contrast()
+            else:
+                self.model.histogram_stretch(last_stretch)
+        else:
+            if last_mask is not None:
+                self.model.masks = last_mask
         self.history.append(action)
-        self._update_view()
+        self._update_view(reset_view=True)
 
     # --------- event filter ---------
     def eventFilter(self, obj, event):
@@ -599,6 +623,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             "  Arrow keys - previous/next slice\n"
             "  D/E - dilate/erode current mask\n"
             "  Z/X - undo/redo\n"
+            "  \u2318D or \u2325D - clear all foreground\n"
             "  P - toggle brush painting\n"
             "  [ and ] - change brush size\n"
             "  H - hand tool (panning)\n"

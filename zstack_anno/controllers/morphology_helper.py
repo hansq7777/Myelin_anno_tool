@@ -169,11 +169,12 @@ class MorphologyMixin:
             pct = float(self.stretch_edit.text())
         except ValueError:
             pct = 0.0
+        self._push_undo("stretch", mask=None)
         if pct <= 0:
             self.model.reset_contrast()
         else:
             self.model.histogram_stretch(pct)
-        self._update_view()
+        self._update_view(reset_view=True)
 
     def _apply_blur(self: 'MainController') -> None:
         if self.model.data is None:
@@ -280,4 +281,13 @@ class MorphologyMixin:
 
     def _cancel_operation(self: 'MainController') -> None:
         self.cancel_event.set()
+
+    def _clear_foreground(self: 'MainController') -> None:
+        """Reset the entire mask stack to background."""
+        if self.model.masks is None:
+            return
+        self._push_undo("clear_foreground")
+        self.model.masks[:] = 0
+        self.model.mask_dirty = True
+        self._update_view()
 
