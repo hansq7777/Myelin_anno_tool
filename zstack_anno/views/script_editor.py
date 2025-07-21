@@ -142,6 +142,22 @@ class ScriptEditor(QDialog):
         "Histogram Stretch": {"method": "script_stretch", "params": {"percentile": 0.0}},
         "Gaussian Blur": {"method": "script_blur", "params": {"sigma": 1.0}},
         "Clear Blur": {"method": "script_clear_blur", "params": {}},
+        "Frangi Filter": {
+            "method": "script_frangi_filter",
+            "params": {"sigma_start": 1.0, "sigma_end": 3.0, "sigma_step": 1.0, "threshold": 0.5},
+        },
+        "Sato Filter": {
+            "method": "script_sato_filter",
+            "params": {"sigma_start": 1.0, "sigma_end": 3.0, "sigma_step": 1.0, "threshold": 0.5},
+        },
+        "Meijering Filter": {
+            "method": "script_meijering_filter",
+            "params": {"sigma_start": 1.0, "sigma_end": 3.0, "sigma_step": 1.0, "threshold": 0.5},
+        },
+        "Shortest Path": {
+            "method": "script_shortest_path",
+            "params": {"y0": 0, "x0": 0, "y1": 10, "x1": 10},
+        },
         "Save": {"method": "script_save", "params": {}},
     }
 

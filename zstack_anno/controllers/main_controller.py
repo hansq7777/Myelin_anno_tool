@@ -327,6 +327,23 @@ class MainController(QMainWindow):
         resample_act = image_menu.addAction("Resample…")
         resample_act.triggered.connect(self._resample_stack)
 
+        linear_menu = self.menuBar().addMenu("Linear")
+        frangi_act = linear_menu.addAction("Frangi Filter")
+        frangi_act.triggered.connect(
+            lambda: self.script_frangi_filter())
+        sato_act = linear_menu.addAction("Sato Filter")
+        sato_act.triggered.connect(
+            lambda: self.script_sato_filter())
+        meij_act = linear_menu.addAction("Meijering Filter")
+        meij_act.triggered.connect(
+            lambda: self.script_meijering_filter())
+        thin_act = linear_menu.addAction("Thin Skeleton")
+        thin_act.triggered.connect(
+            lambda: self.script_skeletonize(algorithm="thin"))
+        path_act = linear_menu.addAction("Shortest Path")
+        path_act.triggered.connect(
+            lambda: self.script_shortest_path())
+
         tool_menu = self.menuBar().addMenu("Tools")
         script_act = tool_menu.addAction("Script Editor")
         script_act.triggered.connect(self._open_script_editor)
@@ -931,6 +948,74 @@ class MainController(QMainWindow):
 
     def script_clear_blur(self) -> None:
         self.model.remove_gaussian_blur()
+        self._update_view()
+
+    def script_frangi_filter(
+        self,
+        sigma_start: float = 1.0,
+        sigma_end: float = 3.0,
+        sigma_step: float = 1.0,
+        threshold: float = 0.5,
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        sigmas = np.arange(sigma_start, sigma_end + sigma_step, sigma_step)
+        response = morphology_tools.frangi_filter_slice(img, sigmas=sigmas)
+        mask = (response > threshold).astype(np.uint8)
+        self._push_undo("frangi")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_sato_filter(
+        self,
+        sigma_start: float = 1.0,
+        sigma_end: float = 3.0,
+        sigma_step: float = 1.0,
+        threshold: float = 0.5,
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        sigmas = np.arange(sigma_start, sigma_end + sigma_step, sigma_step)
+        response = morphology_tools.sato_filter_slice(img, sigmas=sigmas)
+        mask = (response > threshold).astype(np.uint8)
+        self._push_undo("sato")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_meijering_filter(
+        self,
+        sigma_start: float = 1.0,
+        sigma_end: float = 3.0,
+        sigma_step: float = 1.0,
+        threshold: float = 0.5,
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        sigmas = np.arange(sigma_start, sigma_end + sigma_step, sigma_step)
+        response = morphology_tools.meijering_filter_slice(img, sigmas=sigmas)
+        mask = (response > threshold).astype(np.uint8)
+        self._push_undo("meijering")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_shortest_path(
+        self,
+        y0: int = 0,
+        x0: int = 0,
+        y1: int = 10,
+        x1: int = 10,
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        path = morphology_tools.shortest_path_slice(img, (y0, x0), (y1, x1))
+        cur = self.model.get_mask()
+        cur[path > 0] = 1
+        self._push_undo("shortest_path")
+        self.model.set_mask(cur)
         self._update_view()
 
     def script_stretch(self, percentile: float = 0.0) -> None:

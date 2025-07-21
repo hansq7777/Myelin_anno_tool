@@ -24,6 +24,9 @@ from zstack_anno.utils.morphology_tools import (
     flood_region_grow,
     skeletonize_slice,
     skeletonize_stack,
+    frangi_filter_slice,
+    thin_slice,
+    shortest_path_slice,
 )
 
 
@@ -307,6 +310,28 @@ def test_skeletonize_stack_3d():
     result = skeletonize_stack(stack, algorithm="skeletonize_3d")
     assert result.shape == stack.shape
     assert result.sum() > 0
+
+
+def test_frangi_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    img[2, :] = 255
+    result = frangi_filter_slice(img, sigmas=(1,))
+    assert result.shape == img.shape
+    assert result.max() > 0
+
+
+def test_thin_slice():
+    mask = np.zeros((5, 5), dtype=np.uint8)
+    mask[1:4, 2] = 1
+    result = thin_slice(mask)
+    assert result.sum() <= mask.sum()
+
+
+def test_shortest_path_slice():
+    img = np.ones((5, 5), dtype=float)
+    mask = shortest_path_slice(img, (0, 0), (4, 4))
+    assert mask[0, 0] == 1
+    assert mask[4, 4] == 1
 
 
 
