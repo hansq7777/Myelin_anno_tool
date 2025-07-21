@@ -281,20 +281,16 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
 
         linear_menu = self.menuBar().addMenu("Linear")
         frangi_act = linear_menu.addAction("Frangi Filter")
-        frangi_act.triggered.connect(
-            lambda: self.script_frangi_filter())
+        frangi_act.triggered.connect(self._frangi_filter_prompt)
         sato_act = linear_menu.addAction("Sato Filter")
-        sato_act.triggered.connect(
-            lambda: self.script_sato_filter())
+        sato_act.triggered.connect(self._sato_filter_prompt)
         meij_act = linear_menu.addAction("Meijering Filter")
-        meij_act.triggered.connect(
-            lambda: self.script_meijering_filter())
+        meij_act.triggered.connect(self._meijering_filter_prompt)
         thin_act = linear_menu.addAction("Thin Skeleton")
         thin_act.triggered.connect(
             lambda: self.script_skeletonize(algorithm="thin"))
         path_act = linear_menu.addAction("Shortest Path")
-        path_act.triggered.connect(
-            lambda: self.script_shortest_path())
+        path_act.triggered.connect(self._shortest_path_prompt)
 
         tool_menu = self.menuBar().addMenu("Tools")
         script_act = tool_menu.addAction("Script Editor")
@@ -663,4 +659,68 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.script_editor.show()
         self.script_editor.raise_()
         self.script_editor.activateWindow()
+
+    def _frangi_filter_prompt(self) -> None:
+        """Prompt for Frangi filter parameters and apply the filter."""
+        start, ok = QInputDialog.getDouble(self, "Frangi Filter", "Sigma start:", 1.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        end, ok = QInputDialog.getDouble(self, "Frangi Filter", "Sigma end:", 3.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        step, ok = QInputDialog.getDouble(self, "Frangi Filter", "Sigma step:", 1.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        thresh, ok = QInputDialog.getDouble(self, "Frangi Filter", "Threshold:", 0.5, 0.0, 1.0, 2)
+        if not ok:
+            return
+        self.script_frangi_filter(start, end, step, thresh)
+
+    def _sato_filter_prompt(self) -> None:
+        """Prompt for Sato filter parameters and apply the filter."""
+        start, ok = QInputDialog.getDouble(self, "Sato Filter", "Sigma start:", 1.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        end, ok = QInputDialog.getDouble(self, "Sato Filter", "Sigma end:", 3.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        step, ok = QInputDialog.getDouble(self, "Sato Filter", "Sigma step:", 1.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        thresh, ok = QInputDialog.getDouble(self, "Sato Filter", "Threshold:", 0.5, 0.0, 1.0, 2)
+        if not ok:
+            return
+        self.script_sato_filter(start, end, step, thresh)
+
+    def _meijering_filter_prompt(self) -> None:
+        """Prompt for Meijering filter parameters and apply the filter."""
+        start, ok = QInputDialog.getDouble(self, "Meijering Filter", "Sigma start:", 1.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        end, ok = QInputDialog.getDouble(self, "Meijering Filter", "Sigma end:", 3.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        step, ok = QInputDialog.getDouble(self, "Meijering Filter", "Sigma step:", 1.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        thresh, ok = QInputDialog.getDouble(self, "Meijering Filter", "Threshold:", 0.5, 0.0, 1.0, 2)
+        if not ok:
+            return
+        self.script_meijering_filter(start, end, step, thresh)
+
+    def _shortest_path_prompt(self) -> None:
+        """Prompt for start and end coordinates for the shortest path."""
+        y0, ok = QInputDialog.getInt(self, "Shortest Path", "Start Y:", 0, 0)
+        if not ok:
+            return
+        x0, ok = QInputDialog.getInt(self, "Shortest Path", "Start X:", 0, 0)
+        if not ok:
+            return
+        y1, ok = QInputDialog.getInt(self, "Shortest Path", "End Y:", 10, 0)
+        if not ok:
+            return
+        x1, ok = QInputDialog.getInt(self, "Shortest Path", "End X:", 10, 0)
+        if not ok:
+            return
+        self.script_shortest_path(y0, x0, y1, x1)
 
