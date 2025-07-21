@@ -26,6 +26,7 @@ class StrategyRunner:
         "Histogram Stretch": "stretch",
         "Gaussian Blur": "blur",
         "Clear Blur": "clear_blur",
+        "Check Segment": "check_segment",
         "Next Slice": "next_slice",
         "Previous Slice": "prev_slice",
     }
@@ -116,6 +117,10 @@ class StrategyRunner:
         self.model.ensure_masks()
         self.model.remove_background(percentile, bins)
 
+    def check_segment(self, percentile: float = 5.0, continuous: bool = True) -> bool:
+        mask = self.model.get_segment_mask(percentile, continuous)
+        return bool(mask[self.model.index])
+
     def next_slice(self) -> None:
         if self.model.index + 1 < self.model.n_slices:
             self.model.index += 1
@@ -136,7 +141,9 @@ class StrategyRunner:
             if method is None:
                 continue
             params = step.get("params", {})
-            method(**params)
+            result = method(**params)
+            if result is False:
+                break
 
 
 def compute_metrics(gt: np.ndarray, pred: np.ndarray) -> tuple[float, float]:

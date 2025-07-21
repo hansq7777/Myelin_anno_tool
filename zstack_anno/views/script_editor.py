@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QWidget,
     QLabel,
     QLineEdit,
+    QCheckBox,
     QMessageBox,
     QApplication,
 )
@@ -74,29 +75,37 @@ class StepWidget(QWidget):
         self._item = item
         self._action = action
         self._defaults = params.copy()
-        self._inputs: dict[str, QLineEdit] = {}
+        self._inputs: dict[str, QWidget] = {}
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.addWidget(QLabel(action))
         for key, value in params.items():
             layout.addWidget(QLabel(f"{key}:"))
-            edit = QLineEdit()
-            if value is not None:
-                edit.setText(str(value))
+            if isinstance(value, bool):
+                widget = QCheckBox()
+                widget.setChecked(value)
+                widget.stateChanged.connect(self._update_item)
             else:
-                edit.setPlaceholderText(str(key))
-            edit.editingFinished.connect(self._update_item)
-            layout.addWidget(edit)
-            self._inputs[key] = edit
+                widget = QLineEdit()
+                if value is not None:
+                    widget.setText(str(value))
+                else:
+                    widget.setPlaceholderText(str(key))
+                widget.editingFinished.connect(self._update_item)
+            layout.addWidget(widget)
+            self._inputs[key] = widget
         layout.addStretch(1)
         self._update_item()
 
     def _update_item(self) -> None:
         params: dict[str, object] = {}
-        for key, edit in self._inputs.items():
-            text = edit.text().strip()
+        for key, widget in self._inputs.items():
             default = self._defaults.get(key)
+            if isinstance(widget, QCheckBox):
+                params[key] = widget.isChecked()
+                continue
+            text = widget.text().strip()
             if text == "":
                 params[key] = default
                 continue
@@ -113,7 +122,11 @@ class StepWidget(QWidget):
     def set_params(self, params: dict) -> None:
         for key, value in params.items():
             if key in self._inputs:
-                self._inputs[key].setText("" if value is None else str(value))
+                widget = self._inputs[key]
+                if isinstance(widget, QCheckBox):
+                    widget.setChecked(bool(value))
+                else:
+                    widget.setText("" if value is None else str(value))
         self._update_item()
 
 
@@ -142,6 +155,10 @@ class ScriptEditor(QDialog):
         "Histogram Stretch": {"method": "script_stretch", "params": {"percentile": 0.0}},
         "Gaussian Blur": {"method": "script_blur", "params": {"sigma": 1.0}},
         "Clear Blur": {"method": "script_clear_blur", "params": {}},
+        "Check Segment": {
+            "method": "script_check_segment",
+            "params": {"percentile": 5.0, "continuous": True},
+        },
         "Frangi Filter": {
             "method": "script_frangi_filter",
             "params": {"sigma_start": 1.0, "sigma_end": 3.0, "sigma_step": 1.0, "threshold": 0.5},
@@ -310,11 +327,13 @@ class ScriptEditor(QDialog):
             if method:
                 prev_index = self.controller.model.index
                 step_start = time.monotonic()
-                method(**params)
+                result = method(**params)
                 step_time = time.monotonic() - step_start
                 self.controller.report_action(action, params)
                 print(f"Time for {action}: {step_time:.3f}s")
                 QApplication.processEvents()
+                if result is False:
+                    break
                 if (
                     action == "Next Slice"
                     and self.controller.model.index == prev_index

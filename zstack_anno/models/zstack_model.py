@@ -30,6 +30,10 @@ class ZStackModel:
         self.blur_sigma: float = 0.0
         self.stretch_percent: float = 0.0
         self.show_original: bool = False
+        # per-slice intensity stats and segmentation mask
+        self._slice_intensity: np.ndarray | None = None
+        self._seg_params: tuple[float, bool] | None = None
+        self._segment_mask: np.ndarray | None = None
 
     def load(self, path: str) -> None:
         """Load a TIFF stack and reset masks."""
@@ -59,6 +63,9 @@ class ZStackModel:
         self.blur_sigma = 0.0
         self.stretch_percent = 0.0
         self.show_original = False
+        self._slice_intensity = None
+        self._seg_params = None
+        self._segment_mask = None
 
     def load_masks(self, path: str) -> None:
         """Load mask stack from a TIFF file."""
@@ -177,6 +184,30 @@ class ZStackModel:
         return int(
             sum(self.components[i].max() for i in range(self.components.shape[0]))
         )
+
+    # -------- intensity helpers ---------
+    def _compute_slice_intensity(self) -> np.ndarray:
+        if self.original_data is None:
+            raise RuntimeError("Image not loaded")
+        if self._slice_intensity is None:
+            flat = self.original_data.reshape(self.n_slices, -1)
+            self._slice_intensity = flat.mean(axis=1)
+        return self._slice_intensity
+
+    def get_segment_mask(self, percentile: float = 5.0, continuous: bool = True) -> np.ndarray:
+        """Return boolean mask of slices considered worth segmenting."""
+        params = (percentile, continuous)
+        if self._segment_mask is None or self._seg_params != params:
+            intens = self._compute_slice_intensity()
+            thresh = np.percentile(intens, percentile)
+            mask = intens >= thresh
+            if continuous and mask.any():
+                first = mask.argmax()
+                last = len(mask) - 1 - mask[::-1].argmax()
+                mask[first : last + 1] = True
+            self._segment_mask = mask
+            self._seg_params = params
+        return self._segment_mask
 
     # --------- slice helpers ---------
     def _extract_slice(self, idx: int) -> np.ndarray:
