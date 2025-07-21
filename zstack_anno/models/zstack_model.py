@@ -198,9 +198,14 @@ class ZStackModel:
         """Return boolean mask of slices considered worth segmenting."""
         params = (percentile, continuous)
         if self._segment_mask is None or self._seg_params != params:
-            intens = self._compute_slice_intensity()
-            thresh = np.percentile(intens, percentile)
-            mask = intens >= thresh
+            if self.original_data is None:
+                raise RuntimeError("Image not loaded")
+            mask = []
+            for slice_ in self.original_data:
+                low = np.percentile(slice_, percentile)
+                high = np.percentile(slice_, 100 - percentile)
+                mask.append(high > low)
+            mask = np.array(mask, dtype=bool)
             if continuous and mask.any():
                 first = mask.argmax()
                 last = len(mask) - 1 - mask[::-1].argmax()
