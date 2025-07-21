@@ -16,6 +16,7 @@ if "tifffile" not in sys.modules:
     sys.modules["tifffile"] = types.ModuleType("tifffile")
 
 from zstack_anno.models.zstack_model import ZStackModel
+from zstack_anno.pipeline import StrategyRunner
 from zstack_anno.utils.morphology_tools import (
     gaussian_blur_stack,
     histogram_stretch_stack,
@@ -124,3 +125,25 @@ def test_threshold_normalized_overlay():
     model.threshold_normalized(50.0, slice_idx=0)
     expected = np.array([[1, 0], [1, 1]], dtype=np.uint8)
     assert np.array_equal(model.get_mask(0), expected)
+
+
+def test_strategy_runner_skip_on_check_segment():
+    model = ZStackModel()
+    model.data = np.array([
+        [[0]],
+        [[100]],
+    ], dtype=np.uint8)
+    model.original_data = model.data.copy()
+    model.ensure_masks()
+    runner = StrategyRunner(model)
+    steps = [
+        {"action": "Check Segment", "params": {"percentile": 50.0, "continuous": True}},
+        {"action": "Dilate", "params": {"iterations": 1}},
+    ]
+
+    model.index = 0
+    result = runner.run_steps(steps)
+
+    assert result is False
+    assert model.index == 1
+    assert np.array_equal(model.get_mask(0), np.zeros((1, 1), dtype=np.uint8))

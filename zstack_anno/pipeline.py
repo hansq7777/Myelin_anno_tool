@@ -129,7 +129,8 @@ class StrategyRunner:
         if self.model.index > 0:
             self.model.index -= 1
 
-    def run_steps(self, steps: Iterable[dict]) -> None:
+    def run_steps(self, steps: Iterable[dict]) -> bool:
+        """Run ``steps`` once. Return ``False`` if aborted early."""
         for step in steps:
             action = step.get("action")
             if not action:
@@ -143,7 +144,9 @@ class StrategyRunner:
             params = step.get("params", {})
             result = method(**params)
             if result is False:
-                break
+                self.next_slice()
+                return False
+        return True
 
 
 def compute_metrics(gt: np.ndarray, pred: np.ndarray) -> tuple[float, float]:

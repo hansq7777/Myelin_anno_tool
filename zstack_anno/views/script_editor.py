@@ -291,14 +291,23 @@ class ScriptEditor(QDialog):
         item.setText(self.format_step(data))
         self._save_to_config()
 
-    def run_script(self) -> float:
-        """Run the configured steps once and return the elapsed time."""
+    def run_script(self) -> tuple[float, bool]:
+        """Run the configured steps once.
+
+        Returns
+        -------
+        elapsed : float
+            Execution time in seconds.
+        skipped : bool
+            ``True`` if execution stopped early due to ``Check Segment``.
+        """
         if self.controller.model.data is None:
             QMessageBox.warning(self, "No Image", "Please load an image first")
-            return 0.0
+            return 0.0, False
         start_time = time.monotonic()
         self._paused = False
         self._stopped = False
+        skipped = False
         for idx in range(self.step_list.count()):
             if self._stopped:
                 break
@@ -333,6 +342,8 @@ class ScriptEditor(QDialog):
                 print(f"Time for {action}: {step_time:.3f}s")
                 QApplication.processEvents()
                 if result is False:
+                    skipped = True
+                    self.controller.script_next_slice()
                     break
                 if (
                     action == "Next Slice"
@@ -344,7 +355,7 @@ class ScriptEditor(QDialog):
                     time.sleep(0.1)
                 if self._stopped:
                     break
-        return time.monotonic() - start_time
+        return time.monotonic() - start_time, skipped
 
     def save_script(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -438,14 +449,15 @@ class ScriptEditor(QDialog):
         self.controller.slider.setValue(start_idx)
         while True:
             slice_start = self.controller.model.index
-            elapsed = self.run_script()
+            elapsed, skipped = self.run_script()
             self.controller.script_save()
             print(
                 f"Slice {slice_start + 1}/{self.controller.model.n_slices} finished in {elapsed:.3f}s"
             )
             if self.controller.model.index >= end_idx or self._stopped:
                 break
-            self.controller.script_next_slice()
+            if not skipped:
+                self.controller.script_next_slice()
             QApplication.processEvents()
 
     def _run_single_stack(self) -> None:
