@@ -333,6 +333,7 @@ class ScriptEditor(QDialog):
                 print(f"Time for {action}: {step_time:.3f}s")
                 QApplication.processEvents()
                 if result is False:
+                    self.controller.script_next_slice()
                     break
                 if (
                     action == "Next Slice"
@@ -445,7 +446,8 @@ class ScriptEditor(QDialog):
             )
             if self.controller.model.index >= end_idx or self._stopped:
                 break
-            self.controller.script_next_slice()
+            if self.controller.model.index == slice_start:
+                self.controller.script_next_slice()
             QApplication.processEvents()
 
     def _run_single_stack(self) -> None:
