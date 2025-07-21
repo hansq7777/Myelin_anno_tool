@@ -129,10 +129,10 @@ def test_threshold_normalized_overlay():
 
 def test_strategy_runner_skip_on_check_segment():
     model = ZStackModel()
-    model.data = np.array([
-        [[0]],
-        [[100]],
-    ], dtype=np.uint8)
+    slice0 = np.zeros((10, 10), dtype=np.uint8)
+    slice1 = np.zeros((10, 10), dtype=np.uint8)
+    slice1.flat[:10] = 100
+    model.data = np.stack([slice0, slice1])
     model.original_data = model.data.copy()
     model.ensure_masks()
     runner = StrategyRunner(model)
@@ -146,4 +146,4 @@ def test_strategy_runner_skip_on_check_segment():
 
     assert result is False
     assert model.index == 1
-    assert np.array_equal(model.get_mask(0), np.zeros((1, 1), dtype=np.uint8))
+    assert np.array_equal(model.get_mask(0), np.zeros((10, 10), dtype=np.uint8))
