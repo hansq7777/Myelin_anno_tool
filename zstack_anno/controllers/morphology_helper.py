@@ -192,7 +192,7 @@ class MorphologyMixin:
             self.model.reset_contrast()
         else:
             self.model.histogram_stretch(pct)
-        self._update_view(reset_view=True)
+        self._update_view()
 
     def _apply_blur(self: "MainController") -> None:
         if self.model.data is None:

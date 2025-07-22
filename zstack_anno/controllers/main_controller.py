@@ -462,7 +462,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
                 self.model.masks = last_mask
         if self.history:
             self.history.pop()
-        self._update_view(reset_view=True)
+        self._update_view()
 
     def _redo(self) -> None:
         if not self.redo_stack:
@@ -479,7 +479,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             if last_mask is not None:
                 self.model.masks = last_mask
         self.history.append(action)
-        self._update_view(reset_view=True)
+        self._update_view()
 
     # --------- event filter ---------
     def eventFilter(self, obj, event):
