@@ -16,6 +16,7 @@ class StrategyRunner:
     ACTION_MAP = {
         "Dilate": "dilate",
         "Erode": "erode",
+        "Close": "close",
         "Filter Small": "filter_small",
         "Threshold Abs": "threshold_abs",
         "Threshold Norm": "threshold_norm",
@@ -45,6 +46,12 @@ class StrategyRunner:
         self.model.ensure_masks()
         cur = self.model.get_mask()
         new = morphology_tools.erode(cur, iterations=iterations)
+        self.model.set_mask(new)
+
+    def close(self) -> None:
+        self.model.ensure_masks()
+        cur = self.model.get_mask()
+        new = morphology_tools.close(cur)
         self.model.set_mask(new)
 
     def filter_small(self, threshold: int = 100) -> None:

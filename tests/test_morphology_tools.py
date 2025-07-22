@@ -14,6 +14,7 @@ from zstack_anno.utils.morphology_tools import (
     erode,
     label_components,
     remove_small,
+    close,
     histogram_stretch_stack,
     threshold_absolute,
     threshold_normalized,
@@ -73,6 +74,27 @@ def test_remove_small():
         dtype=np.uint8,
     )
     assert np.array_equal(filtered, expected)
+
+
+def test_close():
+    mask = np.array(
+        [[1, 1, 1],
+         [1, 0, 1],
+         [1, 1, 1]],
+        dtype=np.uint8,
+    )
+    closed = close(mask)
+    expected = np.ones_like(mask)
+    assert np.array_equal(closed, expected)
+
+    separate = np.array(
+        [[1, 0, 1],
+         [0, 0, 0],
+         [1, 0, 1]],
+        dtype=np.uint8,
+    )
+    closed2 = close(separate)
+    assert np.array_equal(closed2, separate)
 
 
 def test_threshold_absolute():

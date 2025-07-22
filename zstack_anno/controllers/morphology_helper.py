@@ -87,6 +87,15 @@ class MorphologyMixin:
         self.model.set_mask(new)
         self._update_view()
 
+    def _close_current(self: 'MainController') -> None:
+        if not self._ensure_masks():
+            return
+        self._push_undo("close")
+        cur = self.model.get_mask()
+        new = morphology_tools.close(cur)
+        self.model.set_mask(new)
+        self._update_view()
+
     def _filter_small(self: 'MainController') -> None:
         if not self._ensure_masks():
             return

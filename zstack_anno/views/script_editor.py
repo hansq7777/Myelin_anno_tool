@@ -156,6 +156,7 @@ class ScriptEditor(QDialog):
         "Previous Slice": {"method": "script_prev_slice", "params": {}},
         "Dilate": {"method": "script_dilate", "params": {"iterations": 1}},
         "Erode": {"method": "script_erode", "params": {"iterations": 1}},
+        "Close": {"method": "script_close", "params": {}},
         "Filter Small": {"method": "script_filter_small", "params": {"threshold": 100}},
         "Threshold Abs": {"method": "script_threshold_abs", "params": {"value": 0.0}},
         "Threshold Norm": {"method": "script_threshold_norm", "params": {"percent": 50.0}},
