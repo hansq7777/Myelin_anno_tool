@@ -47,10 +47,10 @@ class StrategyRunner:
         new = morphology_tools.erode(cur, iterations=iterations)
         self.model.set_mask(new)
 
-    def close(self) -> None:
+    def close(self, strength: int = 1) -> None:
         self.model.ensure_masks()
         cur = self.model.get_mask()
-        new = morphology_tools.close(cur)
+        new = morphology_tools.close(cur, strength)
         self.model.set_mask(new)
 
     def filter_small(self, threshold: int = 100) -> None:
@@ -232,9 +232,15 @@ def run_strategy(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate segmentation strategies")
     parser.add_argument("--stack", required=True, help="Path to image stack")
-    parser.add_argument("--groundtruth", required=True, help="Path to ground truth mask stack")
-    parser.add_argument("--strategies", nargs="+", required=True, help="JSON files defining strategies")
-    parser.add_argument("--output", default="pipeline_results", help="Folder for output overlays")
+    parser.add_argument(
+        "--groundtruth", required=True, help="Path to ground truth mask stack"
+    )
+    parser.add_argument(
+        "--strategies", nargs="+", required=True, help="JSON files defining strategies"
+    )
+    parser.add_argument(
+        "--output", default="pipeline_results", help="Folder for output overlays"
+    )
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)

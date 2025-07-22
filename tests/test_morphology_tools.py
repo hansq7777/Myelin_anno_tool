@@ -3,7 +3,8 @@ import sys
 from pathlib import Path
 import threading
 import pytest
-np = importlib.import_module('numpy') if importlib.util.find_spec('numpy') else None
+
+np = importlib.import_module("numpy") if importlib.util.find_spec("numpy") else None
 if np is None:
     pytest.skip("numpy not available", allow_module_level=True)
 root = Path(__file__).resolve().parents[1]
@@ -49,9 +50,7 @@ def test_erode():
 
 def test_label_components():
     mask = np.array(
-        [[1, 0, 0],
-         [1, 1, 0],
-         [0, 0, 1]],
+        [[1, 0, 0], [1, 1, 0], [0, 0, 1]],
         dtype=np.uint8,
     )
     labels = label_components(mask)
@@ -61,16 +60,12 @@ def test_label_components():
 
 def test_remove_small():
     mask = np.array(
-        [[1, 0, 0],
-         [1, 1, 0],
-         [0, 0, 1]],
+        [[1, 0, 0], [1, 1, 0], [0, 0, 1]],
         dtype=np.uint8,
     )
     filtered = remove_small(mask, 3)
     expected = np.array(
-        [[1, 0, 0],
-         [1, 1, 0],
-         [0, 0, 0]],
+        [[1, 0, 0], [1, 1, 0], [0, 0, 0]],
         dtype=np.uint8,
     )
     assert np.array_equal(filtered, expected)
@@ -78,33 +73,29 @@ def test_remove_small():
 
 def test_close():
     mask = np.array(
-        [[1, 1, 1],
-         [1, 0, 1],
-         [1, 1, 1]],
+        [[1, 1, 1], [1, 0, 1], [1, 1, 1]],
         dtype=np.uint8,
     )
-    closed = close(mask)
+    closed = close(mask, strength=1)
     expected = np.ones_like(mask)
     assert np.array_equal(closed, expected)
 
     large_hole = np.array(
-        [[1, 1, 1, 1],
-         [1, 0, 0, 1],
-         [1, 0, 0, 1],
-         [1, 1, 1, 1]],
+        [[1, 1, 1, 1], [1, 0, 0, 1], [1, 0, 0, 1], [1, 1, 1, 1]],
         dtype=np.uint8,
     )
-    closed_large = close(large_hole)
+    closed_large = close(large_hole, strength=1)
     assert np.array_equal(closed_large, large_hole)
 
     separate = np.array(
-        [[1, 0, 1],
-         [0, 0, 0],
-         [1, 0, 1]],
+        [[1, 0, 1], [0, 0, 0], [1, 0, 1]],
         dtype=np.uint8,
     )
-    closed2 = close(separate)
+    closed2 = close(separate, strength=1)
     assert np.array_equal(closed2, separate)
+
+    closed_large_strength = close(large_hole, strength=4)
+    assert np.array_equal(closed_large_strength, np.ones_like(large_hole))
 
 
 def test_threshold_absolute():
@@ -174,11 +165,13 @@ def test_sample_seeds():
 
 def test_intensity_region_grow():
     img = np.array(
-        [[10, 10, 10, 10, 10],
-         [10, 50, 50, 50, 10],
-         [10, 50, 80, 50, 10],
-         [10, 50, 50, 50, 10],
-         [10, 10, 10, 10, 10]],
+        [
+            [10, 10, 10, 10, 10],
+            [10, 50, 50, 50, 10],
+            [10, 50, 80, 50, 10],
+            [10, 50, 50, 50, 10],
+            [10, 10, 10, 10, 10],
+        ],
         dtype=float,
     )
     mask = np.zeros_like(img, dtype=np.uint8)
@@ -271,10 +264,13 @@ def test_flood_region_grow_cancel():
 
 
 def test_remove_mask_background_stack_progress():
-    imgs = np.array([
-        [[10, 20], [30, 40]],
-        [[50, 60], [70, 80]],
-    ], dtype=np.uint8)
+    imgs = np.array(
+        [
+            [[10, 20], [30, 40]],
+            [[50, 60], [70, 80]],
+        ],
+        dtype=np.uint8,
+    )
     masks = np.ones_like(imgs, dtype=np.uint8)
     calls: list[tuple[int, int]] = []
 
@@ -391,6 +387,3 @@ def test_shortest_path_slice():
     mask = shortest_path_slice(img, (0, 0), (4, 4))
     assert mask[0, 0] == 1
     assert mask[4, 4] == 1
-
-
-

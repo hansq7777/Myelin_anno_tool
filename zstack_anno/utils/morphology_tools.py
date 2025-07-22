@@ -53,6 +53,7 @@ def _load_skeletonize_3d() -> Callable | None:
             skeletonize_3d = _sk_skeletonize_3d
     return skeletonize_3d
 
+
 try:
     from scipy.ndimage import binary_dilation as nd_binary_dilation
     from scipy.ndimage import binary_erosion as nd_binary_erosion
@@ -106,7 +107,7 @@ def _print_progress(
     line:
         If provided, update the specified console line to allow multiple
         progress bars to be shown in parallel.
-    
+
     Displays an estimated remaining time when printed to the console.
     """
 
@@ -178,7 +179,9 @@ def dilate(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
     """Dilate ``mask`` by a 3x3 structuring element."""
     mask_bool = mask > 0
     if nd_binary_dilation is not None:
-        result = nd_binary_dilation(mask_bool, structure=np.ones((3, 3)), iterations=iterations)
+        result = nd_binary_dilation(
+            mask_bool, structure=np.ones((3, 3)), iterations=iterations
+        )
         return result.astype(mask.dtype)
     if sk_binary_dilation is not None:
         result = mask_bool
@@ -195,7 +198,9 @@ def erode(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
     """Erode ``mask`` by a 3x3 structuring element."""
     mask_bool = mask > 0
     if nd_binary_erosion is not None:
-        result = nd_binary_erosion(mask_bool, structure=np.ones((3, 3)), iterations=iterations)
+        result = nd_binary_erosion(
+            mask_bool, structure=np.ones((3, 3)), iterations=iterations
+        )
         return result.astype(mask.dtype)
     if sk_binary_erosion is not None:
         result = mask_bool
@@ -223,7 +228,7 @@ def label_components(mask: np.ndarray) -> np.ndarray:
                 labels[y, x] = current
                 while stack:
                     cy, cx = stack.pop()
-                    for dy, dx in ((-1,0),(1,0),(0,-1),(0,1)):
+                    for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
                         ny, nx = cy + dy, cx + dx
                         if (
                             0 <= ny < h
@@ -264,8 +269,13 @@ def remove_small_stack(stack: np.ndarray, min_size: int) -> np.ndarray:
     return np.stack([remove_small(slice_, min_size) for slice_ in stack])
 
 
-def close(mask: np.ndarray) -> np.ndarray:
-    """Fill small holes within ``mask`` without merging separate components."""
+def close(mask: np.ndarray, strength: int = 1) -> np.ndarray:
+    """Fill holes within ``mask`` up to ``strength`` pixels in size.
+
+    ``strength`` controls the maximum area of a hole that will be closed. The
+    operation is performed on each connected component individually so that
+    neighbouring masks are not merged.
+    """
 
     mask_bool = mask > 0
 
@@ -290,19 +300,18 @@ def close(mask: np.ndarray) -> np.ndarray:
     if labels.max() == 0:
         return filled.astype(mask.dtype)
 
-    # Only keep holes smaller than the area covered by one dilation/erosion
-    MAX_HOLE_SIZE = 1
+    max_hole_size = max(1, int(strength))
     result = mask_bool.copy()
     for lbl in range(1, labels.max() + 1):
-        if np.sum(labels == lbl) <= MAX_HOLE_SIZE:
+        if np.sum(labels == lbl) <= max_hole_size:
             result[labels == lbl] = True
 
     return result.astype(mask.dtype)
 
 
-def close_stack(stack: np.ndarray) -> np.ndarray:
-    """Apply ``close`` to every slice of a stack."""
-    return np.stack([close(s) for s in stack])
+def close_stack(stack: np.ndarray, strength: int = 1) -> np.ndarray:
+    """Apply :func:`close` to every slice of ``stack`` with the given strength."""
+    return np.stack([close(s, strength=strength) for s in stack])
 
 
 def threshold_absolute(slice_: np.ndarray, value: float) -> np.ndarray:
@@ -340,8 +349,6 @@ def histogram_stretch(slice_: np.ndarray, percentile: float) -> np.ndarray:
 def histogram_stretch_stack(stack: np.ndarray, percentile: float) -> np.ndarray:
     """Apply ``histogram_stretch`` to every slice of a stack."""
     return np.stack([histogram_stretch(s, percentile) for s in stack])
-
-
 
 
 def remove_mask_background(
@@ -585,7 +592,6 @@ def sample_seeds(
     return mask
 
 
-
 def intensity_region_grow(
     slice_: np.ndarray,
     mask: np.ndarray,
@@ -595,7 +601,7 @@ def intensity_region_grow(
     max_growth: int | None = None,
     progress: bool = False,
     progress_fn: Callable | None = None,
-    cancel_event: 'threading.Event | None' = None,
+    cancel_event: "threading.Event | None" = None,
 ) -> np.ndarray:
     """Grow ``mask`` based on intensity similarity.
 
@@ -624,8 +630,13 @@ def intensity_region_grow(
 
     total = len(unique)
     if progress:
-        _print_progress("Int grow", 0, total, callback=progress_fn,
-                        mask=(labels > 0).astype(np.uint8))
+        _print_progress(
+            "Int grow",
+            0,
+            total,
+            callback=progress_fn,
+            mask=(labels > 0).astype(np.uint8),
+        )
     for idx, lv in enumerate(unique, start=1):
         if cancel_event is not None and cancel_event.is_set():
             return mask
@@ -694,7 +705,7 @@ def intensity_region_grow(
                     progress_fn(processed, region_total)  # type: ignore[arg-type]
             if reached:
                 break
-        
+
     final = label_components(labels > 0)
     return (final > 0).astype(np.uint8)
 
@@ -708,7 +719,7 @@ def flood_region_grow(
     progress: bool = False,
     progress_fn: Callable | None = None,
     workers: int = 1,
-    cancel_event: 'threading.Event | None' = None,
+    cancel_event: "threading.Event | None" = None,
 ) -> np.ndarray:
     """Grow ``mask`` using ``skimage.segmentation.flood`` for each component.
 
@@ -837,7 +848,9 @@ def _skeletonize_numpy(slice_: np.ndarray) -> np.ndarray:
     return skeleton
 
 
-def skeletonize_slice(slice_: np.ndarray, algorithm: str = "skeletonize", **kwargs) -> np.ndarray:
+def skeletonize_slice(
+    slice_: np.ndarray, algorithm: str = "skeletonize", **kwargs
+) -> np.ndarray:
     """Skeletonize a single binary slice using the chosen algorithm."""
     img = slice_ > 0
     if algorithm == "skeletonize_3d":
@@ -861,7 +874,9 @@ def skeletonize_slice(slice_: np.ndarray, algorithm: str = "skeletonize", **kwar
     return _skeletonize_numpy(slice_)
 
 
-def skeletonize_stack(stack: np.ndarray, algorithm: str = "skeletonize", **kwargs) -> np.ndarray:
+def skeletonize_stack(
+    stack: np.ndarray, algorithm: str = "skeletonize", **kwargs
+) -> np.ndarray:
     """Skeletonize an entire mask stack or volume."""
     if algorithm == "skeletonize_3d":
         if _load_skeletonize_3d() is not None:
@@ -944,5 +959,3 @@ def shortest_path_slice(
     for y, x in coords:
         result[int(y), int(x)] = 1
     return result
-
-
