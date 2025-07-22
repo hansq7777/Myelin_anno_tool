@@ -17,7 +17,7 @@ if np_spec is None:
 if "tifffile" not in sys.modules:
     sys.modules["tifffile"] = types.ModuleType("tifffile")
 
-from zstack_anno.pipeline import run_strategy
+from zstack_anno.pipeline import run_strategy, read_stack
 
 
 def test_run_strategy_single_slice(tmp_path):
@@ -43,3 +43,13 @@ def test_run_strategy_single_slice(tmp_path):
     assert np.array_equal(pred[0], np.zeros((2, 2), dtype=np.uint8))
     assert precision == 1.0
     assert recall == 1.0
+
+
+def test_read_stack_squeezes(tmp_path):
+    arr = np.zeros((1, 1, 3, 2, 2), dtype=np.uint8)
+    path = tmp_path / "stack.tif"
+    tifffile.imwrite(path, arr)
+
+    result = read_stack(str(path))
+
+    assert result.shape == (3, 2, 2)
