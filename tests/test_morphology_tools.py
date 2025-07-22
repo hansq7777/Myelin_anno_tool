@@ -87,6 +87,14 @@ def test_close():
     expected = np.ones_like(mask)
     assert np.array_equal(closed, expected)
 
+    # without sufficient strength the hole should remain
+    no_close = close(mask, strength=0)
+    assert np.array_equal(no_close, mask)
+
+    # small strength fills the single pixel hole
+    closed_strength = close(mask, strength=1)
+    assert np.array_equal(closed_strength, expected)
+
     separate = np.array(
         [[1, 0, 1],
          [0, 0, 0],
@@ -95,6 +103,25 @@ def test_close():
     )
     closed2 = close(separate)
     assert np.array_equal(closed2, separate)
+
+
+def test_close_strength_large_hole():
+    mask = np.array(
+        [
+            [1, 1, 1, 1, 1],
+            [1, 0, 0, 0, 1],
+            [1, 0, 0, 0, 1],
+            [1, 0, 0, 0, 1],
+            [1, 1, 1, 1, 1],
+        ],
+        dtype=np.uint8,
+    )
+    # hole size 9 pixels - too big for strength 5
+    not_closed = close(mask, strength=5)
+    assert np.array_equal(not_closed, mask)
+
+    closed = close(mask, strength=10)
+    assert np.array_equal(closed, np.ones_like(mask))
 
 
 def test_threshold_absolute():

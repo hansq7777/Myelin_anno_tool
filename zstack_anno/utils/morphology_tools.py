@@ -12,6 +12,7 @@ try:
         binary_dilation as sk_binary_dilation,
         binary_erosion as sk_binary_erosion,
         remove_small_objects,
+        remove_small_holes,
         skeletonize,
         medial_axis,
     )
@@ -22,6 +23,7 @@ except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
     sk_binary_dilation = None  # type: ignore
     sk_binary_erosion = None  # type: ignore
     remove_small_objects = None  # type: ignore
+    remove_small_holes = None  # type: ignore
     skeletonize = None  # type: ignore
     medial_axis = None  # type: ignore
     label = None  # type: ignore
@@ -264,28 +266,49 @@ def remove_small_stack(stack: np.ndarray, min_size: int) -> np.ndarray:
     return np.stack([remove_small(slice_, min_size) for slice_ in stack])
 
 
-def close(mask: np.ndarray) -> np.ndarray:
-    """Fill holes within ``mask`` without merging separate components."""
+def close(mask: np.ndarray, strength: int | None = None) -> np.ndarray:
+    """Fill holes within ``mask`` without merging separate components.
+
+    Parameters
+    ----------
+    mask:
+        Input binary mask.
+    strength:
+        Maximum size in pixels of holes to fill. ``None`` fills all holes.
+    """
+
     mask_bool = mask > 0
-    if nd_binary_fill_holes is not None:
+
+    if strength is None and nd_binary_fill_holes is not None:
         result = nd_binary_fill_holes(mask_bool)
+        return result.astype(mask.dtype)
+
+    if strength is not None and remove_small_holes is not None:
+        result = remove_small_holes(mask_bool, area_threshold=strength + 1)
         return result.astype(mask.dtype)
 
     inv = ~mask_bool
     labels = label_components(inv.astype(np.uint8))
     if labels.max() == 0:
         return mask.copy()
-    border = np.unique(
-        np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])
+
+    border = set(
+        np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
     )
-    fill = ~np.isin(labels, border)
-    inv[fill] = False
-    return (~inv).astype(mask.dtype)
+    result = mask_bool.copy()
+    for lbl in range(1, labels.max() + 1):
+        if lbl in border:
+            continue
+        area = np.sum(labels == lbl)
+        if strength is None or area <= strength:
+            result[labels == lbl] = True
+
+    return result.astype(mask.dtype)
 
 
-def close_stack(stack: np.ndarray) -> np.ndarray:
+def close_stack(stack: np.ndarray, strength: int | None = None) -> np.ndarray:
     """Apply ``close`` to every slice of a stack."""
-    return np.stack([close(s) for s in stack])
+    return np.stack([close(s, strength) for s in stack])
 
 
 def threshold_absolute(slice_: np.ndarray, value: float) -> np.ndarray:
