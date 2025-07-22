@@ -21,6 +21,7 @@ import numpy as np
 from ..models.zstack_model import ZStackModel
 from ..views.canvas import SliceCanvas
 from ..views.script_editor import ScriptEditor
+from ..views.comparison_dialog import ComparisonDialog
 from ..utils import morphology_tools
 from ..utils.dialogs import question_with_shortcuts
 from ..utils import config
@@ -286,6 +287,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         # Ctrl+E is mapped to Command+E automatically on macOS, so include
         # it alongside Alt/Meta for cross-platform compatibility.
         script_act.setShortcuts(["Alt+E", "Ctrl+E", "Meta+E"])
+        compare_act = tool_menu.addAction("Strategy Comparison")
+        compare_act.triggered.connect(self._open_comparison_dialog)
 
         help_menu = self.menuBar().addMenu("Help")
         help_act = help_menu.addAction("Shortcuts && Features")
@@ -640,6 +643,11 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.script_editor.show()
         self.script_editor.raise_()
         self.script_editor.activateWindow()
+
+    def _open_comparison_dialog(self) -> None:
+        """Open the strategy comparison dialog."""
+        dialog = ComparisonDialog(self)
+        dialog.exec_()
 
     def _frangi_filter_prompt(self) -> None:
         """Prompt for Frangi filter parameters and apply the filter."""
