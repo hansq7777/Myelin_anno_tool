@@ -38,7 +38,9 @@ class IntGrowThread(QThread):
         self.limit = limit
         self._next = 0.2
 
-    def _progress_cb(self, cur: int, total: int, mask: np.ndarray | None = None) -> None:
+    def _progress_cb(
+        self, cur: int, total: int, mask: np.ndarray | None = None
+    ) -> None:
         if mask is None or total == 0:
             return
         frac = cur / float(total)
@@ -67,7 +69,7 @@ class IntGrowThread(QThread):
 class MorphologyMixin:
     """Actions for modifying masks and images."""
 
-    def _dilate_current(self: 'MainController') -> None:
+    def _dilate_current(self: "MainController") -> None:
         if not self._ensure_masks():
             return
         self._push_undo("dilate")
@@ -77,7 +79,7 @@ class MorphologyMixin:
         self.model.set_mask(new)
         self._update_view()
 
-    def _erode_current(self: 'MainController') -> None:
+    def _erode_current(self: "MainController") -> None:
         if not self._ensure_masks():
             return
         self._push_undo("erode")
@@ -87,16 +89,17 @@ class MorphologyMixin:
         self.model.set_mask(new)
         self._update_view()
 
-    def _close_current(self: 'MainController') -> None:
+    def _close_current(self: "MainController") -> None:
         if not self._ensure_masks():
             return
         self._push_undo("close")
         cur = self.model.get_mask()
-        new = morphology_tools.close(cur)
+        strength = self.strength_spin.value() if hasattr(self, "strength_spin") else 1
+        new = morphology_tools.close(cur, strength)
         self.model.set_mask(new)
         self._update_view()
 
-    def _filter_small(self: 'MainController') -> None:
+    def _filter_small(self: "MainController") -> None:
         if not self._ensure_masks():
             return
         self._push_undo("filter")
@@ -106,11 +109,13 @@ class MorphologyMixin:
         self.model.set_mask(new)
         self._update_view()
 
-    def _skeletonize_current(self: 'MainController') -> None:
+    def _skeletonize_current(self: "MainController") -> None:
         if not self._ensure_masks():
             return
         algorithms = ["skeletonize", "skeletonize_3d", "medial_axis"]
-        alg, ok = QInputDialog.getItem(self, "Skeletonize", "Algorithm:", algorithms, 0, False)
+        alg, ok = QInputDialog.getItem(
+            self, "Skeletonize", "Algorithm:", algorithms, 0, False
+        )
         if not ok or not alg:
             return
         params: dict[str, object] = {}
@@ -125,7 +130,9 @@ class MorphologyMixin:
         if alg == "skeletonize_3d":
             if self.model.masks is None:
                 return
-            result = morphology_tools.skeletonize_stack(self.model.masks, algorithm=alg, **params)
+            result = morphology_tools.skeletonize_stack(
+                self.model.masks, algorithm=alg, **params
+            )
             self.model.masks = result
         else:
             cur = self.model.get_mask()
@@ -133,7 +140,7 @@ class MorphologyMixin:
             self.model.set_mask(new)
         self._update_view()
 
-    def _threshold_abs(self: 'MainController') -> None:
+    def _threshold_abs(self: "MainController") -> None:
         if not self._ensure_masks():
             return
         try:
@@ -144,7 +151,7 @@ class MorphologyMixin:
         self.model.threshold_absolute(value)
         self._update_view()
 
-    def _threshold_norm(self: 'MainController') -> None:
+    def _threshold_norm(self: "MainController") -> None:
         if not self._ensure_masks():
             return
         try:
@@ -155,7 +162,7 @@ class MorphologyMixin:
         self.model.threshold_normalized(pct)
         self._update_view()
 
-    def _apply_bg_filter(self: 'MainController') -> None:
+    def _apply_bg_filter(self: "MainController") -> None:
         if not self._ensure_masks():
             return
         try:
@@ -168,10 +175,12 @@ class MorphologyMixin:
             bins = 0
         self._push_undo("bg_filter")
         self._next_progress = 0.2
-        self.model.remove_background(pct, bins, progress=True, progress_fn=self._progress_update)
+        self.model.remove_background(
+            pct, bins, progress=True, progress_fn=self._progress_update
+        )
         self._update_view()
 
-    def _apply_stretch(self: 'MainController') -> None:
+    def _apply_stretch(self: "MainController") -> None:
         if self.model.data is None:
             return
         try:
@@ -185,45 +194,53 @@ class MorphologyMixin:
             self.model.histogram_stretch(pct)
         self._update_view(reset_view=True)
 
-    def _apply_blur(self: 'MainController') -> None:
+    def _apply_blur(self: "MainController") -> None:
         if self.model.data is None:
             return
         sigma = float(self.blur_spin.value()) if hasattr(self, "blur_spin") else 1.0
         self.model.apply_gaussian_blur(sigma)
         self._update_view()
 
-    def _toggle_original(self: 'MainController') -> None:
+    def _toggle_original(self: "MainController") -> None:
         self.model.toggle_show_original()
         self._update_view()
 
-    def _change_opacity(self: 'MainController') -> None:
+    def _change_opacity(self: "MainController") -> None:
         value = self.opacity_slider.value() if hasattr(self, "opacity_slider") else 50
         self.canvas.set_mask_opacity(value / 100.0)
         mask = self.model.get_mask() if self.model.masks is not None else None
         self.canvas.set_mask(mask)
 
-    def _clear_blur(self: 'MainController') -> None:
+    def _clear_blur(self: "MainController") -> None:
         self.model.remove_gaussian_blur()
         self._update_view()
 
-    def _reverse_image(self: 'MainController') -> None:
+    def _reverse_image(self: "MainController") -> None:
         self.model.toggle_reverse_intensity()
         self._update_view()
 
-    def _resample_stack(self: 'MainController') -> None:
+    def _resample_stack(self: "MainController") -> None:
         if self.model.data is None:
             return
         sizes = self.model.get_pixel_sizes()
         if sizes is None:
-            QMessageBox.warning(self, "Resample", "Pixel size information not found in metadata")
+            QMessageBox.warning(
+                self, "Resample", "Pixel size information not found in metadata"
+            )
             return
-        x, ok = QInputDialog.getDouble(self, "New X size", "PhysicalSizeX", sizes[0], 0.000001, 1e6, 6)
+        x, ok = QInputDialog.getDouble(
+            self, "New X size", "PhysicalSizeX", sizes[0], 0.000001, 1e6, 6
+        )
         if not ok:
             return
-        y, ok = QInputDialog.getDouble(self, "New Y size", "PhysicalSizeY", sizes[1], 0.000001, 1e6, 6)
+        y, ok = QInputDialog.getDouble(
+            self, "New Y size", "PhysicalSizeY", sizes[1], 0.000001, 1e6, 6
+        )
         if not ok:
             return
-        z, ok = QInputDialog.getDouble(self, "New Z size", "PhysicalSizeZ", sizes[2], 0.000001, 1e6, 6)
+        z, ok = QInputDialog.getDouble(
+            self, "New Z size", "PhysicalSizeZ", sizes[2], 0.000001, 1e6, 6
+        )
         if not ok:
             return
         folder = QFileDialog.getExistingDirectory(self, "Select Save Folder")
@@ -235,7 +252,7 @@ class MorphologyMixin:
         self.model.save_resampled_stack(path, x, y, z)
         QMessageBox.information(self, "Resample", f"Saved to {path}")
 
-    def _seed_current(self: 'MainController') -> None:
+    def _seed_current(self: "MainController") -> None:
         if not self._ensure_masks():
             return
         try:
@@ -251,10 +268,13 @@ class MorphologyMixin:
         self.model.set_mask(cur)
         self._update_view()
 
-    def _grow_intensity(self: 'MainController') -> None:
+    def _grow_intensity(self: "MainController") -> None:
         if not self._ensure_masks():
             return
-        if getattr(self, "grow_thread", None) is not None and self.grow_thread.isRunning():
+        if (
+            getattr(self, "grow_thread", None) is not None
+            and self.grow_thread.isRunning()
+        ):
             return
         try:
             diff_pct = float(self.int_diff_edit.text())
@@ -269,28 +289,31 @@ class MorphologyMixin:
         cur = self.model.get_mask()
         self.cancel_event.clear()
         self.int_grow_btn.setEnabled(False)
-        self.grow_thread = IntGrowThread(img.astype(float), cur, diff_pct, hist_pct, None, self.cancel_event)
+        self.grow_thread = IntGrowThread(
+            img.astype(float), cur, diff_pct, hist_pct, None, self.cancel_event
+        )
         self.grow_thread.finished.connect(self._int_grow_finished)
         self.grow_thread.cancelled.connect(self._int_grow_cancelled)
         self.grow_thread.progress.connect(self._thread_progress)
         self.grow_thread.start()
 
-    def _int_grow_finished(self: 'MainController', result: np.ndarray) -> None:
+    def _int_grow_finished(self: "MainController", result: np.ndarray) -> None:
         self.model.set_mask(result)
         self._update_view()
         self.int_grow_btn.setEnabled(True)
         self.grow_thread = None
 
-    def _int_grow_cancelled(self: 'MainController') -> None:
+    def _int_grow_cancelled(self: "MainController") -> None:
         self.int_grow_btn.setEnabled(True)
         self.statusBar().showMessage("Operation cancelled")
         self.grow_thread = None
 
-    def _thread_progress(self: 'MainController', mask: np.ndarray, cur: int, total: int) -> None:
+    def _thread_progress(
+        self: "MainController", mask: np.ndarray, cur: int, total: int
+    ) -> None:
         self._progress_update(cur, total, mask)
 
-
-    def _clear_foreground(self: 'MainController') -> None:
+    def _clear_foreground(self: "MainController") -> None:
         """Reset the current mask slice to background."""
         if self.model.masks is None:
             return
@@ -298,4 +321,3 @@ class MorphologyMixin:
         blank = np.zeros_like(self.model.get_mask())
         self.model.set_mask(blank)
         self._update_view()
-

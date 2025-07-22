@@ -12,7 +12,7 @@ if TYPE_CHECKING:  # pragma: no cover
 class ScriptMixin:
     """Methods used by the ScriptEditor."""
 
-    def script_dilate(self: 'MainController', iterations: int = 1) -> None:
+    def script_dilate(self: "MainController", iterations: int = 1) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("dilate")
@@ -21,7 +21,7 @@ class ScriptMixin:
         self.model.set_mask(new)
         self._update_view()
 
-    def script_erode(self: 'MainController', iterations: int = 1) -> None:
+    def script_erode(self: "MainController", iterations: int = 1) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("erode")
@@ -30,16 +30,16 @@ class ScriptMixin:
         self.model.set_mask(new)
         self._update_view()
 
-    def script_close(self: 'MainController') -> None:
+    def script_close(self: "MainController", strength: int = 1) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("close")
         cur = self.model.get_mask()
-        new = morphology_tools.close(cur)
+        new = morphology_tools.close(cur, strength)
         self.model.set_mask(new)
         self._update_view()
 
-    def script_filter_small(self: 'MainController', threshold: int = 100) -> None:
+    def script_filter_small(self: "MainController", threshold: int = 100) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("filter")
@@ -49,7 +49,9 @@ class ScriptMixin:
         self._update_view()
 
     def script_skeletonize(
-        self: 'MainController', algorithm: str = "skeletonize", return_distance: bool = False
+        self: "MainController",
+        algorithm: str = "skeletonize",
+        return_distance: bool = False,
     ) -> None:
         if not self._ensure_masks():
             return
@@ -57,7 +59,9 @@ class ScriptMixin:
         if algorithm == "skeletonize_3d":
             if self.model.masks is None:
                 return
-            result = morphology_tools.skeletonize_stack(self.model.masks, algorithm=algorithm)
+            result = morphology_tools.skeletonize_stack(
+                self.model.masks, algorithm=algorithm
+            )
             self.model.masks = result
         else:
             cur = self.model.get_mask()
@@ -68,21 +72,21 @@ class ScriptMixin:
             self.model.set_mask(new)
         self._update_view()
 
-    def script_threshold_abs(self: 'MainController', value: float = 0.0) -> None:
+    def script_threshold_abs(self: "MainController", value: float = 0.0) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("thresh_abs")
         self.model.threshold_absolute(value)
         self._update_view()
 
-    def script_threshold_norm(self: 'MainController', percent: float = 50.0) -> None:
+    def script_threshold_norm(self: "MainController", percent: float = 50.0) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("thresh_norm")
         self.model.threshold_normalized(percent)
         self._update_view()
 
-    def script_seed(self: 'MainController', percentile: float = 90.0) -> None:
+    def script_seed(self: "MainController", percentile: float = 90.0) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("seed")
@@ -95,7 +99,7 @@ class ScriptMixin:
         self._update_view()
 
     def script_int_grow(
-        self: 'MainController',
+        self: "MainController",
         diff_pct: float = 20.0,
         hist_pct: float | None = None,
         force_pct: float | None = None,
@@ -121,7 +125,7 @@ class ScriptMixin:
         self._update_view()
 
     def script_flood_grow(
-        self: 'MainController',
+        self: "MainController",
         connectivity: int = 1,
         tolerance: float = 5.0,
         workers: int = 1,
@@ -144,24 +148,24 @@ class ScriptMixin:
         self.model.set_mask(grown)
         self._update_view()
 
-    def script_blur(self: 'MainController', sigma: float = 1.0) -> None:
+    def script_blur(self: "MainController", sigma: float = 1.0) -> None:
         if self.model.data is None:
             return
         self.model.apply_gaussian_blur(sigma)
         self._update_view()
 
-    def script_clear_blur(self: 'MainController') -> None:
+    def script_clear_blur(self: "MainController") -> None:
         self.model.remove_gaussian_blur()
         self._update_view()
 
-    def script_reverse_image(self: 'MainController') -> None:
+    def script_reverse_image(self: "MainController") -> None:
         if self.model.data is None:
             return
         self.model.toggle_reverse_intensity()
         self._update_view()
 
     def script_frangi_filter(
-        self: 'MainController',
+        self: "MainController",
         sigma_start: float = 1.0,
         sigma_end: float = 3.0,
         sigma_step: float = 1.0,
@@ -181,7 +185,7 @@ class ScriptMixin:
         self._update_view()
 
     def script_sato_filter(
-        self: 'MainController',
+        self: "MainController",
         sigma_start: float = 1.0,
         sigma_end: float = 3.0,
         sigma_step: float = 1.0,
@@ -201,7 +205,7 @@ class ScriptMixin:
         self._update_view()
 
     def script_meijering_filter(
-        self: 'MainController',
+        self: "MainController",
         sigma_start: float = 1.0,
         sigma_end: float = 3.0,
         sigma_step: float = 1.0,
@@ -221,7 +225,7 @@ class ScriptMixin:
         self._update_view()
 
     def script_shortest_path(
-        self: 'MainController',
+        self: "MainController",
         y0: int = 0,
         x0: int = 0,
         y1: int = 10,
@@ -237,7 +241,7 @@ class ScriptMixin:
         self.model.set_mask(cur)
         self._update_view()
 
-    def script_stretch(self: 'MainController', percentile: float = 0.0) -> None:
+    def script_stretch(self: "MainController", percentile: float = 0.0) -> None:
         if self.model.data is None:
             return
         if percentile <= 0:
@@ -246,16 +250,20 @@ class ScriptMixin:
             self.model.histogram_stretch(percentile)
         self._update_view()
 
-    def script_bg_filter(self: 'MainController', percentile: float = 0.0, bins: int = 0) -> None:
+    def script_bg_filter(
+        self: "MainController", percentile: float = 0.0, bins: int = 0
+    ) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("bg_filter")
         self._next_progress = 0.2
-        self.model.remove_background(percentile, bins, progress=True, progress_fn=self._progress_update)
+        self.model.remove_background(
+            percentile, bins, progress=True, progress_fn=self._progress_update
+        )
         self._update_view()
 
     def script_check_segment(
-        self: 'MainController', percentile: float = 5.0, continuous: bool = True
+        self: "MainController", percentile: float = 5.0, continuous: bool = True
     ) -> bool:
         """Return False to skip segmentation of the current slice."""
         if self.model.data is None:
@@ -263,12 +271,11 @@ class ScriptMixin:
         mask = self.model.get_segment_mask(percentile, continuous)
         return bool(mask[self.model.index])
 
-    def script_next_slice(self: 'MainController') -> None:
+    def script_next_slice(self: "MainController") -> None:
         self._next_slice()
 
-    def script_prev_slice(self: 'MainController') -> None:
+    def script_prev_slice(self: "MainController") -> None:
         self._prev_slice()
 
-    def script_save(self: 'MainController') -> None:
+    def script_save(self: "MainController") -> None:
         self._quick_save_masks()
-
