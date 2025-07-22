@@ -594,14 +594,21 @@ def gaussian_blur_stack(stack: np.ndarray, sigma: float) -> np.ndarray:
 
 
 def sample_seeds(
-    slice_: np.ndarray, percentile: float, num_seeds: int = 20000
+    slice_: np.ndarray, percentile: float, pixel_percent: float = 1.0
 ) -> np.ndarray:
-    """Randomly sample ``num_seeds`` pixels above a percentile threshold."""
+    """Randomly sample pixels above a percentile threshold.
+
+    ``pixel_percent`` determines what percentage of the total pixels in the
+    slice should be selected as seeds. The value is clamped to the number of
+    available pixels above ``percentile``.
+    """
     thresh = np.percentile(slice_, percentile)
     coords = np.argwhere(slice_ > thresh)
     if coords.size == 0:
         return np.zeros_like(slice_, dtype=np.uint8)
-    n = min(num_seeds, coords.shape[0])
+    n = int(round(slice_.size * pixel_percent / 100.0))
+    n = max(n, 0)
+    n = min(n, coords.shape[0])
     idx = np.random.default_rng().choice(coords.shape[0], n, replace=False)
     selected = coords[idx]
     mask = np.zeros_like(slice_, dtype=np.uint8)

@@ -138,6 +138,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         grow_layout = QVBoxLayout()
         self.seed_thresh_edit = QLineEdit()
         self.seed_thresh_edit.setPlaceholderText("Seed %")
+        self.seed_pix_edit = QLineEdit()
+        self.seed_pix_edit.setPlaceholderText("Pix %")
         self.seed_btn = QPushButton("Seed")
         self.seed_btn.clicked.connect(self._seed_current)
         self.int_diff_edit = QLineEdit()
@@ -147,6 +149,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.int_grow_btn = QPushButton("Int Grow")
         self.int_grow_btn.clicked.connect(self._grow_intensity)
         grow_layout.addWidget(self.seed_thresh_edit)
+        grow_layout.addWidget(self.seed_pix_edit)
         grow_layout.addWidget(self.seed_btn)
         grow_layout.addWidget(self.int_diff_edit)
         grow_layout.addWidget(self.int_hist_edit)
@@ -637,7 +640,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             "  Dilate/Erode/Skeleton - basic mask operations; Strength sets iteration count\n"
             "  Filter </spin - remove small components by pixel count\n"
             "  Threshold Abs/Norm - threshold by value or percentage\n"
-            "  Seed % + Seed - create mask seeds above intensity percentile\n"
+            "  Seed %/Pix % + Seed - create mask seeds above intensity percentile\n"
             "  Diff %/Hist % + Int Grow - expand mask using intensity difference and optional histogram cutoff\n"
             "  BG %/Bins + BG Filter - remove low intensity pixels using percentile and histogram bins\n"
             "  Stretch % + Stretch - histogram stretch (0 resets to original)\n"

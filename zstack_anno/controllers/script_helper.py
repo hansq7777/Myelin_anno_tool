@@ -86,13 +86,17 @@ class ScriptMixin:
         self.model.threshold_normalized(percent)
         self._update_view()
 
-    def script_seed(self: "MainController", percentile: float = 90.0) -> None:
+    def script_seed(
+        self: "MainController", percentile: float = 90.0, pixel_percent: float = 1.0
+    ) -> None:
         if not self._ensure_masks():
             return
         self._push_undo("seed")
         img = self.model._extract_slice(self.model.index)
         cur = self.model.get_mask()
-        seeds = morphology_tools.sample_seeds(img, percentile, num_seeds=20000)
+        seeds = morphology_tools.sample_seeds(
+            img, percentile, pixel_percent=pixel_percent
+        )
         cur = cur.copy()
         cur[seeds > 0] = 1
         self.model.set_mask(cur)
