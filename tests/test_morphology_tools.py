@@ -31,6 +31,10 @@ from zstack_anno.utils.morphology_tools import (
     meijering_filter_slice,
     thin_slice,
     shortest_path_slice,
+    felzenszwalb_slice,
+    watershed_ift_slice,
+    fmm_distance_slice,
+    sitk_fast_marching_slice,
 )
 
 
@@ -387,3 +391,34 @@ def test_shortest_path_slice():
     mask = shortest_path_slice(img, (0, 0), (4, 4))
     assert mask[0, 0] == 1
     assert mask[4, 4] == 1
+
+
+def test_felzenszwalb_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = felzenszwalb_slice(img)
+    assert result.shape == img.shape
+
+
+def test_watershed_ift_slice():
+    img = np.array([[1, 2], [3, 4]], dtype=np.uint8)
+    markers = np.array([[1, 0], [0, 2]], dtype=np.int32)
+    result = watershed_ift_slice(img, markers)
+    assert result.shape == img.shape
+
+
+def test_fmm_distance_slice():
+    img = np.zeros((5, 5), dtype=float)
+    seeds = np.zeros_like(img, dtype=np.uint8)
+    seeds[2, 2] = 1
+    dist = fmm_distance_slice(img, seeds)
+    assert dist.shape == img.shape
+    assert dist[2, 2] == 0
+
+
+def test_sitk_fast_marching_slice():
+    img = np.zeros((5, 5), dtype=float)
+    seeds = np.zeros_like(img, dtype=np.uint8)
+    seeds[2, 2] = 1
+    dist = sitk_fast_marching_slice(img, seeds, stopping_value=5.0)
+    assert dist.shape == img.shape
+    assert dist[2, 2] == 0

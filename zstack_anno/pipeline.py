@@ -30,6 +30,10 @@ class StrategyRunner:
         "Reverse Intensities": "reverse",
         "Check Segment": "check_segment",
         "Previous Slice": "prev_slice",
+        "Felzenszwalb": "felzenszwalb",
+        "Watershed IFT": "watershed_ift",
+        "scikit-fmm": "scikit_fmm",
+        "Fast Marching": "fast_marching",
     }
 
     def __init__(self, model: ZStackModel) -> None:
@@ -138,6 +142,40 @@ class StrategyRunner:
     def prev_slice(self) -> None:
         if self.model.index > 0:
             self.model.index -= 1
+
+    def felzenszwalb(
+        self, scale: float = 100.0, sigma: float = 0.8, min_size: int = 20
+    ) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        labels = morphology_tools.felzenszwalb_slice(
+            img, scale=scale, sigma=sigma, min_size=min_size
+        )
+        mask = (labels > labels.min()).astype(np.uint8)
+        self.model.set_mask(mask)
+
+    def watershed_ift(self) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        markers = morphology_tools.label_components(self.model.get_mask())
+        labels = morphology_tools.watershed_ift_slice(img, markers)
+        self.model.set_mask((labels > 0).astype(np.uint8))
+
+    def scikit_fmm(self, max_distance: float = 10.0) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        seeds = self.model.get_mask()
+        dist = morphology_tools.fmm_distance_slice(img, seeds)
+        self.model.set_mask((dist <= max_distance).astype(np.uint8))
+
+    def fast_marching(self, stopping_value: float = 10.0) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        seeds = self.model.get_mask()
+        dist = morphology_tools.sitk_fast_marching_slice(
+            img, seeds, stopping_value=stopping_value
+        )
+        self.model.set_mask((dist <= stopping_value).astype(np.uint8))
 
     def run_steps(self, steps: Iterable[dict]) -> bool:
         """Run ``steps`` once. Return ``False`` if aborted early."""

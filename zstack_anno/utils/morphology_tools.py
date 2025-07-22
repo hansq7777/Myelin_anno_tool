@@ -16,7 +16,7 @@ try:
         medial_axis,
     )
     from skimage.measure import label
-    from skimage.segmentation import flood
+    from skimage.segmentation import flood, felzenszwalb
 except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
     logger.warning("scikit-image import failed: %s", exc)
     sk_binary_dilation = None  # type: ignore
@@ -27,6 +27,7 @@ except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
     label = None  # type: ignore
     gaussian = None  # type: ignore
     flood = None  # type: ignore
+    felzenszwalb = None  # type: ignore
 else:
     try:
         from skimage.filters import gaussian, frangi, sato, meijering
@@ -60,6 +61,8 @@ try:
     from scipy.ndimage import binary_fill_holes as nd_binary_fill_holes
     from scipy.ndimage import label as nd_label
     from scipy.ndimage import labeled_comprehension
+    from scipy.ndimage import watershed_ift as nd_watershed_ift
+    from scipy.ndimage import distance_transform_edt
 except ImportError as exc:  # pragma: no cover - scipy may be unavailable
     logger.warning("scipy.ndimage import failed: %s", exc)
     nd_binary_dilation = None  # type: ignore
@@ -67,12 +70,26 @@ except ImportError as exc:  # pragma: no cover - scipy may be unavailable
     nd_binary_fill_holes = None  # type: ignore
     nd_label = None  # type: ignore
     labeled_comprehension = None  # type: ignore
+    nd_watershed_ift = None  # type: ignore
+    distance_transform_edt = None  # type: ignore
 
 try:
     from scipy.ndimage import gaussian_filter  # type: ignore
 except ImportError as exc:  # pragma: no cover - scipy may be unavailable
     logger.warning("scipy.ndimage gaussian_filter import failed: %s", exc)
     gaussian_filter = None
+
+try:  # optional dependency
+    import skfmm
+except Exception as exc:  # pragma: no cover - optional dependency
+    logger.warning("scikit-fmm import failed: %s", exc)
+    skfmm = None  # type: ignore
+
+try:  # optional dependency
+    import SimpleITK as sitk  # type: ignore
+except Exception as exc:  # pragma: no cover - optional dependency
+    logger.warning("SimpleITK import failed: %s", exc)
+    sitk = None  # type: ignore
 
 
 if nd_binary_dilation is None or sk_binary_dilation is None:
@@ -959,3 +976,58 @@ def shortest_path_slice(
     for y, x in coords:
         result[int(y), int(x)] = 1
     return result
+
+
+def felzenszwalb_slice(
+    slice_: np.ndarray,
+    *,
+    scale: float = 100.0,
+    sigma: float = 0.8,
+    min_size: int = 20,
+) -> np.ndarray:
+    """Segment ``slice_`` using the Felzenszwalb algorithm."""
+    if felzenszwalb is None:  # pragma: no cover - optional dependency
+        return slice_.astype(np.int32)
+    return felzenszwalb(
+        slice_.astype(float), scale=scale, sigma=sigma, min_size=min_size
+    ).astype(np.int32)
+
+
+def watershed_ift_slice(
+    image: np.ndarray, markers: np.ndarray, structure: np.ndarray | None = None
+) -> np.ndarray:
+    """Apply ``scipy.ndimage.watershed_ift`` using ``markers`` as seeds."""
+    if nd_watershed_ift is None:  # pragma: no cover - optional dependency
+        return label_components(markers)
+    markers = markers.astype(np.int32)
+    return nd_watershed_ift(image.astype(np.uint8), markers, structure=structure)
+
+
+def fmm_distance_slice(image: np.ndarray, seeds: np.ndarray) -> np.ndarray:
+    """Compute distance map using ``scikit-fmm`` if available."""
+    if skfmm is None:  # pragma: no cover - optional dependency
+        coords = np.argwhere(seeds > 0)
+        if coords.size == 0:
+            return np.full(image.shape, np.inf, dtype=float)
+        y, x = np.indices(image.shape)
+        dists = [np.hypot(y - cy, x - cx) for cy, cx in coords]
+        return np.min(dists, axis=0)
+    phi = np.ones_like(image, dtype=float)
+    phi[seeds > 0] = -1.0
+    return skfmm.distance(phi)
+
+
+def sitk_fast_marching_slice(
+    image: np.ndarray, seeds: np.ndarray, *, stopping_value: float | None = None
+) -> np.ndarray:
+    """Fast marching distance map using SimpleITK when available."""
+    if sitk is None:  # pragma: no cover - optional dependency
+        return fmm_distance_slice(image, seeds)
+    img = sitk.GetImageFromArray(image.astype(np.float32))
+    fm = sitk.FastMarchingImageFilter()
+    pts = [(int(x), int(y)) for y, x in zip(*np.nonzero(seeds))]
+    fm.SetTrialPoints([(*pt, 0.0) for pt in pts])
+    if stopping_value is not None:
+        fm.SetStoppingValue(float(stopping_value))
+    dist_img = fm.Execute(img)
+    return sitk.GetArrayFromImage(dist_img)
