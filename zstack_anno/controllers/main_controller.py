@@ -609,7 +609,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             "  Arrow keys - previous/next slice\n"
             "  D/E - dilate/erode current mask\n"
             "  Z/X - undo/redo\n"
-            "  \u2318D or \u2325D - clear all foreground\n"
+            "  \u2318D or \u2325D - clear foreground on current slice\n"
             "  P - toggle brush painting\n"
             "  [ and ] - change brush size\n"
             "  H - hand tool (panning)\n"

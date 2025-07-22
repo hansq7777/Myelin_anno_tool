@@ -282,11 +282,11 @@ class MorphologyMixin:
 
 
     def _clear_foreground(self: 'MainController') -> None:
-        """Reset the entire mask stack to background."""
+        """Reset the current mask slice to background."""
         if self.model.masks is None:
             return
         self._push_undo("clear_foreground")
-        self.model.masks[:] = 0
-        self.model.mask_dirty = True
+        blank = np.zeros_like(self.model.get_mask())
+        self.model.set_mask(blank)
         self._update_view()
 
