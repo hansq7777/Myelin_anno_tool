@@ -89,7 +89,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         # -------- Controls --------
         ctrl = QHBoxLayout()
 
-        morph_layout = QVBoxLayout()
+        # ---- Mask tools ----
+        mask_layout = QVBoxLayout()
         self.dilate_btn = QPushButton("Dilate")
         self.dilate_btn.clicked.connect(self._dilate_current)
         self.erode_btn = QPushButton("Erode")
@@ -99,22 +100,20 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.strength_spin.setValue(1)
         self.skeleton_btn = QPushButton("Skeleton")
         self.skeleton_btn.clicked.connect(self._skeletonize_current)
-        morph_layout.addWidget(self.dilate_btn)
-        morph_layout.addWidget(self.erode_btn)
-        morph_layout.addWidget(self.strength_spin)
-        morph_layout.addWidget(self.skeleton_btn)
-        ctrl.addLayout(morph_layout)
-
-        filter_layout = QVBoxLayout()
         self.filter_btn = QPushButton("Filter <")
         self.filter_btn.clicked.connect(self._filter_small)
         self.filter_spin = QSpinBox()
         self.filter_spin.setRange(1, 10000)
         self.filter_spin.setValue(100)
-        filter_layout.addWidget(self.filter_btn)
-        filter_layout.addWidget(self.filter_spin)
-        ctrl.addLayout(filter_layout)
+        mask_layout.addWidget(self.dilate_btn)
+        mask_layout.addWidget(self.erode_btn)
+        mask_layout.addWidget(self.strength_spin)
+        mask_layout.addWidget(self.skeleton_btn)
+        mask_layout.addWidget(self.filter_btn)
+        mask_layout.addWidget(self.filter_spin)
+        ctrl.addLayout(mask_layout)
 
+        # ---- Thresholding ----
         thresh_layout = QVBoxLayout()
         self.abs_thresh_edit = QLineEdit()
         self.abs_thresh_edit.setPlaceholderText("Abs >")
@@ -130,48 +129,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         thresh_layout.addWidget(self.norm_thresh_btn)
         ctrl.addLayout(thresh_layout)
 
-
-        bg_layout = QVBoxLayout()
-        self.bg_percentile_edit = QLineEdit()
-        self.bg_percentile_edit.setPlaceholderText("BG %")
-        self.bg_bins_edit = QLineEdit()
-        self.bg_bins_edit.setPlaceholderText("Bins")
-        self.bg_filter_button = QPushButton("BG Filter")
-        self.bg_filter_button.clicked.connect(self._apply_bg_filter)
-        bg_layout.addWidget(self.bg_percentile_edit)
-        bg_layout.addWidget(self.bg_bins_edit)
-        bg_layout.addWidget(self.bg_filter_button)
-        ctrl.addLayout(bg_layout)
-
-        stretch_layout = QVBoxLayout()
-        self.stretch_edit = QLineEdit()
-        self.stretch_edit.setPlaceholderText("Stretch %")
-        self.stretch_button = QPushButton("Stretch")
-        self.stretch_button.clicked.connect(self._apply_stretch)
-        stretch_layout.addWidget(self.stretch_edit)
-        stretch_layout.addWidget(self.stretch_button)
-        ctrl.addLayout(stretch_layout)
-
-        blur_layout = QVBoxLayout()
-        self.show_orig_chk = QCheckBox("Show Original")
-        self.show_orig_chk.toggled.connect(self._toggle_original)
-        self.opacity_slider = QSlider(Qt.Horizontal)
-        self.opacity_slider.setRange(0, 100)
-        self.opacity_slider.setValue(50)
-        self.opacity_slider.valueChanged.connect(self._change_opacity)
-        self.reverse_btn = QPushButton("Reverse")
-        self.reverse_btn.clicked.connect(self._reverse_image)
-        blur_layout.addWidget(self.show_orig_chk)
-        blur_layout.addWidget(self.opacity_slider)
-        blur_layout.addWidget(self.reverse_btn)
-        ctrl.addLayout(blur_layout)
-
-        res_layout = QVBoxLayout()
-        self.resample_btn = QPushButton("Resample")
-        self.resample_btn.clicked.connect(self._resample_stack)
-        res_layout.addWidget(self.resample_btn)
-        ctrl.addLayout(res_layout)
-
+        # ---- Region growing ----
         grow_layout = QVBoxLayout()
         self.seed_thresh_edit = QLineEdit()
         self.seed_thresh_edit.setPlaceholderText("Seed %")
@@ -189,6 +147,43 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         grow_layout.addWidget(self.int_hist_edit)
         grow_layout.addWidget(self.int_grow_btn)
         ctrl.addLayout(grow_layout)
+
+        # ---- Image adjustments ----
+        img_layout = QVBoxLayout()
+        self.bg_percentile_edit = QLineEdit()
+        self.bg_percentile_edit.setPlaceholderText("BG %")
+        self.bg_bins_edit = QLineEdit()
+        self.bg_bins_edit.setPlaceholderText("Bins")
+        self.bg_filter_button = QPushButton("BG Filter")
+        self.bg_filter_button.clicked.connect(self._apply_bg_filter)
+        self.stretch_edit = QLineEdit()
+        self.stretch_edit.setPlaceholderText("Stretch %")
+        self.stretch_button = QPushButton("Stretch")
+        self.stretch_button.clicked.connect(self._apply_stretch)
+        self.reverse_btn = QPushButton("Reverse")
+        self.reverse_btn.clicked.connect(self._reverse_image)
+        self.resample_btn = QPushButton("Resample")
+        self.resample_btn.clicked.connect(self._resample_stack)
+        img_layout.addWidget(self.bg_percentile_edit)
+        img_layout.addWidget(self.bg_bins_edit)
+        img_layout.addWidget(self.bg_filter_button)
+        img_layout.addWidget(self.stretch_edit)
+        img_layout.addWidget(self.stretch_button)
+        img_layout.addWidget(self.reverse_btn)
+        img_layout.addWidget(self.resample_btn)
+        ctrl.addLayout(img_layout)
+
+        # ---- Display ----
+        disp_layout = QVBoxLayout()
+        self.show_orig_chk = QCheckBox("Show Original")
+        self.show_orig_chk.toggled.connect(self._toggle_original)
+        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setRange(0, 100)
+        self.opacity_slider.setValue(50)
+        self.opacity_slider.valueChanged.connect(self._change_opacity)
+        disp_layout.addWidget(self.show_orig_chk)
+        disp_layout.addWidget(self.opacity_slider)
+        ctrl.addLayout(disp_layout)
 
         self.info_label = QLabel("")
         ctrl.addWidget(self.info_label)
@@ -618,20 +613,15 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             "Toolbar Buttons:\n"
             "  Prev/Next - move one slice backward or forward\n"
             "  Slider - jump to a specific slice index\n"
-            "  Dilate/Erode - grow or shrink the mask; Strength sets iteration count\n"
-            "  Skeleton - skeletonize the current mask\n"
+            "  Dilate/Erode/Skeleton - basic mask operations; Strength sets iteration count\n"
+            "  Filter </spin - remove small components by pixel count\n"
             "  Threshold Abs/Norm - threshold by value or percentage\n"
-            "  Strength - number of iterations for Dilate/Erode (1-10)\n"
-            "  Filter < - remove components smaller than value in Filter spin\n"
-            "  Filter spin - minimum pixel count for the small component filter\n"
-            "  BG %/Bins + BG Filter - remove low intensity pixels using percentile and histogram bins\n"
-            "  Stretch % + Stretch - histogram stretch (0 resets to original)\n"
-            "  Show Original - toggle display of the unblurred image\n"
-            "  Opacity Slider - mask overlay transparency\n"
-            "  Reverse - invert pixel intensities\n"
             "  Seed % + Seed - create mask seeds above intensity percentile\n"
             "  Diff %/Hist % + Int Grow - expand mask using intensity difference and optional histogram cutoff\n"
-            "  Conn/Tol + Flood Grow - expand mask using flood fill with connectivity and tolerance\n"
+            "  BG %/Bins + BG Filter - remove low intensity pixels using percentile and histogram bins\n"
+            "  Stretch % + Stretch - histogram stretch (0 resets to original)\n"
+            "  Reverse/Resample - adjust intensity or z-spacing\n"
+            "  Show Original + Opacity Slider - control display transparency\n"
             "  Quick Save - save masks to the default path\n\n"
             "Menus provide the same actions as the toolbar.\n"
             "Zoom with mouse wheel when over the image.\n"
