@@ -87,6 +87,16 @@ def test_close():
     expected = np.ones_like(mask)
     assert np.array_equal(closed, expected)
 
+    large_hole = np.array(
+        [[1, 1, 1, 1],
+         [1, 0, 0, 1],
+         [1, 0, 0, 1],
+         [1, 1, 1, 1]],
+        dtype=np.uint8,
+    )
+    closed_large = close(large_hole)
+    assert np.array_equal(closed_large, large_hole)
+
     separate = np.array(
         [[1, 0, 1],
          [0, 0, 0],
