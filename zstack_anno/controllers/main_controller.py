@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QSpinBox,
     QMessageBox,
+    QInputDialog,
 )
 from PyQt5.QtCore import Qt, QEvent, QPoint
 import threading
