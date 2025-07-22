@@ -152,7 +152,6 @@ class StepWidget(QWidget):
 
 class ScriptEditor(QDialog):
     ACTIONS = {
-        "Next Slice": {"method": "script_next_slice", "params": {}},
         "Previous Slice": {"method": "script_prev_slice", "params": {}},
         "Dilate": {"method": "script_dilate", "params": {"iterations": 1}},
         "Erode": {"method": "script_erode", "params": {"iterations": 1}},
@@ -404,11 +403,6 @@ class ScriptEditor(QDialog):
                     skipped = True
                     self.controller.script_next_slice()
                     break
-                if (
-                    action == "Next Slice"
-                    and self.controller.model.index == prev_index
-                ):
-                    self._stopped = True
                 while self._paused and not self._stopped:
                     QApplication.processEvents()
                     time.sleep(0.1)

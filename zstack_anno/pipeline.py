@@ -29,7 +29,6 @@ class StrategyRunner:
         "Clear Blur": "clear_blur",
         "Reverse Intensities": "reverse",
         "Check Segment": "check_segment",
-        "Next Slice": "next_slice",
         "Previous Slice": "prev_slice",
     }
 
