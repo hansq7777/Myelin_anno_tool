@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene
-from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPixmap, QImage, QTransform
+from PyQt5.QtCore import Qt, pyqtSignal
 import numpy as np
 
 
@@ -22,12 +22,15 @@ class SliceCanvas(QGraphicsView):
         self._mask_opacity = 0.5  # default 50%
 
     def set_image(self, arr: np.ndarray, reset_view: bool = False) -> None:
-        """显示灰度图像。"""
-        if arr.ndim != 2:
-            raise ValueError("只支持 2-D 灰度图")
-
-        h, w = arr.shape
-        img = QImage(arr.data, w, h, QImage.Format_Grayscale8)
+        """显示图像，支持灰度或 RGB."""
+        if arr.ndim == 2:
+            h, w = arr.shape
+            img = QImage(arr.data, w, h, QImage.Format_Grayscale8)
+        elif arr.ndim == 3 and arr.shape[2] == 3:
+            h, w, _ = arr.shape
+            img = QImage(arr.data, w, h, QImage.Format_RGB888)
+        else:
+            raise ValueError("只支持 2-D 灰度图或 3-D RGB 图像")
         pix = QPixmap.fromImage(img)
 
         if self._image_item is None:
@@ -95,4 +98,32 @@ class SliceCanvas(QGraphicsView):
             self._mask_item.setZValue(1)
         else:
             self._mask_item.setPixmap(pix)
+
+
+class SyncCanvas(SliceCanvas):
+    """Canvas that syncs panning and zooming with peers."""
+
+    viewChanged = pyqtSignal(QTransform)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._ignore = False
+
+    def wheelEvent(self, event):
+        super().wheelEvent(event)
+        self._emit_transform()
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.LeftButton:
+            self._emit_transform()
+
+    def _emit_transform(self):
+        if not self._ignore:
+            self.viewChanged.emit(self.transform())
+
+    def apply_transform(self, tr: QTransform) -> None:
+        self._ignore = True
+        self.setTransform(tr)
+        self._ignore = False
 

@@ -17,11 +17,17 @@ from PyQt5.QtWidgets import (
     QSlider,
     QRadioButton,
     QButtonGroup,
+    QSpinBox,
+    QScrollArea,
+    QWidget,
+    QGridLayout,
 )
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QTransform
 from PyQt5.QtCore import Qt
 
 from ..pipeline import run_strategy, overlay_image, read_stack
+from ..views.canvas import SyncCanvas
+from ..models.zstack_model import ZStackModel
 
 
 class ComparisonDialog(QDialog):
@@ -88,11 +94,21 @@ class ComparisonDialog(QDialog):
         ctrl_layout.addWidget(self.whole_radio)
         ctrl_layout.addWidget(self.slice_radio)
         ctrl_layout.addWidget(self.slice_slider)
+        ctrl_layout.addWidget(QLabel("Windows:"))
+        self.window_spin = QSpinBox()
+        self.window_spin.setRange(1, 9)
+        self.window_spin.setValue(4)
+        self.window_spin.valueChanged.connect(self._build_panels)
+        ctrl_layout.addWidget(self.window_spin)
         layout.addLayout(ctrl_layout)
 
         # ---- Results area ----
-        self.img_layout = QHBoxLayout()
-        layout.addLayout(self.img_layout)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.grid_widget = QWidget()
+        self.grid = QGridLayout(self.grid_widget)
+        self.scroll.setWidget(self.grid_widget)
+        layout.addWidget(self.scroll)
 
     # ---- UI helpers ----
     def _choose_stack(self) -> None:
@@ -182,22 +198,39 @@ class ComparisonDialog(QDialog):
         self._update_images()
 
     def _build_panels(self) -> None:
-        # clear layout
-        while self.img_layout.count():
-            item = self.img_layout.takeAt(0)
+        while self.grid.count():
+            item = self.grid.takeAt(0)
             w = item.widget()
             if w:
                 w.deleteLater()
-        self.labels: List[QLabel] = []
+
+        count = max(self.window_spin.value(), len(self._names) + 1)
+        self.canvases: List[SyncCanvas] = []
         titles = ["Ground Truth"] + self._names
-        for title in titles:
-            v = QVBoxLayout()
-            lbl = QLabel()
-            lbl.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
-            v.addWidget(lbl)
-            v.addWidget(QLabel(title))
-            self.img_layout.addLayout(v)
-            self.labels.append(lbl)
+        titles += [""] * (count - len(titles))
+
+        for i in range(count):
+            canvas = SyncCanvas()
+            lbl = QLabel(titles[i])
+            lbl.setAlignment(Qt.AlignHCenter)
+            wrapper = QVBoxLayout()
+            widget = QWidget()
+            wrapper.addWidget(canvas)
+            wrapper.addWidget(lbl)
+            widget.setLayout(wrapper)
+            row, col = divmod(i, 3)
+            self.grid.addWidget(widget, row, col)
+            self.canvases.append(canvas)
+
+        for c in self.canvases:
+            c.viewChanged.connect(self._sync_views)
+
+    def _sync_views(self, transform: QTransform) -> None:
+        sender = self.sender()
+        for c in self.canvases:
+            if c is sender:
+                continue
+            c.apply_transform(transform)
 
     def _update_images(self) -> None:
         if self._stack is None or self._gt is None:
@@ -206,18 +239,16 @@ class ComparisonDialog(QDialog):
         img = self._stack[idx]
         gt_slice = self._gt[idx]
         # first panel: GT overlay
-        base = overlay_image(img, gt_slice, gt_slice)
-        pix = self._to_pixmap(base)
-        self.labels[0].setPixmap(pix)
-        for i, pred in enumerate(self._preds, start=1):
-            overlay = overlay_image(img, gt_slice, pred[idx])
-            pix = self._to_pixmap(overlay)
-            self.labels[i].setPixmap(pix)
-            prec, rec = self._metrics[i - 1]
-            self.labels[i].setToolTip(f"precision={prec:.3f} recall={rec:.3f}")
+        base = overlay_image(img, gt_slice, gt_slice, alpha=0.4)
+        self.canvases[0].set_image(base)
+        for i in range(1, len(self.canvases)):
+            if i - 1 < len(self._preds):
+                overlay = overlay_image(img, gt_slice, self._preds[i - 1][idx], alpha=0.4)
+                self.canvases[i].set_image(overlay)
+                prec, rec = self._metrics[i - 1]
+                tooltip = f"precision={prec:.3f} recall={rec:.3f}"
+            else:
+                self.canvases[i].set_image(np.stack([ZStackModel._normalize_to_8bit(img)] * 3, axis=-1))
+                tooltip = ""
+            self.canvases[i].setToolTip(tooltip)
 
-    @staticmethod
-    def _to_pixmap(arr: np.ndarray) -> QPixmap:
-        h, w, _ = arr.shape
-        img = QImage(arr.data, w, h, QImage.Format_RGB888)
-        return QPixmap.fromImage(img)
