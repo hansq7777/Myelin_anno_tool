@@ -663,7 +663,17 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         thresh, ok = QInputDialog.getDouble(self, "Frangi Filter", "Threshold:", 0.5, 0.0, 1.0, 2)
         if not ok:
             return
-        self.script_frangi_filter(start, end, step, thresh)
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Frangi Filter",
+            "Black ridges?",
+            ["True", "False"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        self.script_frangi_filter(start, end, step, thresh, choice == "True")
 
     def _sato_filter_prompt(self) -> None:
         """Prompt for Sato filter parameters and apply the filter."""
@@ -679,7 +689,17 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         thresh, ok = QInputDialog.getDouble(self, "Sato Filter", "Threshold:", 0.5, 0.0, 1.0, 2)
         if not ok:
             return
-        self.script_sato_filter(start, end, step, thresh)
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Sato Filter",
+            "Black ridges?",
+            ["True", "False"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        self.script_sato_filter(start, end, step, thresh, choice == "True")
 
     def _meijering_filter_prompt(self) -> None:
         """Prompt for Meijering filter parameters and apply the filter."""
@@ -695,7 +715,17 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         thresh, ok = QInputDialog.getDouble(self, "Meijering Filter", "Threshold:", 0.5, 0.0, 1.0, 2)
         if not ok:
             return
-        self.script_meijering_filter(start, end, step, thresh)
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Meijering Filter",
+            "Black ridges?",
+            ["True", "False"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        self.script_meijering_filter(start, end, step, thresh, choice == "True")
 
     def _shortest_path_prompt(self) -> None:
         """Prompt for start and end coordinates for the shortest path."""

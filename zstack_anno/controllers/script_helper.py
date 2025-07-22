@@ -157,12 +157,15 @@ class ScriptMixin:
         sigma_end: float = 3.0,
         sigma_step: float = 1.0,
         threshold: float = 0.5,
+        black_ridges: bool = True,
     ) -> None:
         if not self._ensure_masks():
             return
         img = self.model._extract_slice(self.model.index)
         sigmas = np.arange(sigma_start, sigma_end + sigma_step, sigma_step)
-        response = morphology_tools.frangi_filter_slice(img, sigmas=sigmas)
+        response = morphology_tools.frangi_filter_slice(
+            img, sigmas=sigmas, black_ridges=black_ridges
+        )
         mask = (response > threshold).astype(np.uint8)
         self._push_undo("frangi")
         self.model.set_mask(mask)
@@ -174,12 +177,15 @@ class ScriptMixin:
         sigma_end: float = 3.0,
         sigma_step: float = 1.0,
         threshold: float = 0.5,
+        black_ridges: bool = True,
     ) -> None:
         if not self._ensure_masks():
             return
         img = self.model._extract_slice(self.model.index)
         sigmas = np.arange(sigma_start, sigma_end + sigma_step, sigma_step)
-        response = morphology_tools.sato_filter_slice(img, sigmas=sigmas)
+        response = morphology_tools.sato_filter_slice(
+            img, sigmas=sigmas, black_ridges=black_ridges
+        )
         mask = (response > threshold).astype(np.uint8)
         self._push_undo("sato")
         self.model.set_mask(mask)
@@ -191,12 +197,15 @@ class ScriptMixin:
         sigma_end: float = 3.0,
         sigma_step: float = 1.0,
         threshold: float = 0.5,
+        black_ridges: bool = True,
     ) -> None:
         if not self._ensure_masks():
             return
         img = self.model._extract_slice(self.model.index)
         sigmas = np.arange(sigma_start, sigma_end + sigma_step, sigma_step)
-        response = morphology_tools.meijering_filter_slice(img, sigmas=sigmas)
+        response = morphology_tools.meijering_filter_slice(
+            img, sigmas=sigmas, black_ridges=black_ridges
+        )
         mask = (response > threshold).astype(np.uint8)
         self._push_undo("meijering")
         self.model.set_mask(mask)
