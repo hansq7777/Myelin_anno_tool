@@ -94,15 +94,15 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.dilate_btn.clicked.connect(self._dilate_current)
         self.erode_btn = QPushButton("Erode")
         self.erode_btn.clicked.connect(self._erode_current)
-        self.skeleton_btn = QPushButton("Skeleton")
-        self.skeleton_btn.clicked.connect(self._skeletonize_current)
         self.strength_spin = QSpinBox()
         self.strength_spin.setRange(1, 10)
         self.strength_spin.setValue(1)
+        self.skeleton_btn = QPushButton("Skeleton")
+        self.skeleton_btn.clicked.connect(self._skeletonize_current)
         morph_layout.addWidget(self.dilate_btn)
         morph_layout.addWidget(self.erode_btn)
-        morph_layout.addWidget(self.skeleton_btn)
         morph_layout.addWidget(self.strength_spin)
+        morph_layout.addWidget(self.skeleton_btn)
         ctrl.addLayout(morph_layout)
 
         filter_layout = QVBoxLayout()
@@ -153,26 +153,16 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         ctrl.addLayout(stretch_layout)
 
         blur_layout = QVBoxLayout()
-        self.blur_btn = QPushButton("Blur")
-        self.blur_btn.clicked.connect(self._apply_blur)
-        self.blur_spin = QSpinBox()
-        self.blur_spin.setRange(1, 10)
-        self.blur_spin.setValue(1)
         self.show_orig_chk = QCheckBox("Show Original")
         self.show_orig_chk.toggled.connect(self._toggle_original)
         self.opacity_slider = QSlider(Qt.Horizontal)
         self.opacity_slider.setRange(0, 100)
         self.opacity_slider.setValue(50)
         self.opacity_slider.valueChanged.connect(self._change_opacity)
-        self.clear_blur_btn = QPushButton("Clear Blur")
-        self.clear_blur_btn.clicked.connect(self._clear_blur)
         self.reverse_btn = QPushButton("Reverse")
         self.reverse_btn.clicked.connect(self._reverse_image)
-        blur_layout.addWidget(self.blur_btn)
-        blur_layout.addWidget(self.blur_spin)
         blur_layout.addWidget(self.show_orig_chk)
         blur_layout.addWidget(self.opacity_slider)
-        blur_layout.addWidget(self.clear_blur_btn)
         blur_layout.addWidget(self.reverse_btn)
         ctrl.addLayout(blur_layout)
 
@@ -193,15 +183,11 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.int_hist_edit.setPlaceholderText("Hist %")
         self.int_grow_btn = QPushButton("Int Grow")
         self.int_grow_btn.clicked.connect(self._grow_intensity)
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.clicked.connect(self._cancel_operation)
-        self.cancel_btn.setEnabled(False)
         grow_layout.addWidget(self.seed_thresh_edit)
         grow_layout.addWidget(self.seed_btn)
         grow_layout.addWidget(self.int_diff_edit)
         grow_layout.addWidget(self.int_hist_edit)
         grow_layout.addWidget(self.int_grow_btn)
-        grow_layout.addWidget(self.cancel_btn)
         ctrl.addLayout(grow_layout)
 
         self.info_label = QLabel("")
@@ -640,10 +626,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             "  Filter spin - minimum pixel count for the small component filter\n"
             "  BG %/Bins + BG Filter - remove low intensity pixels using percentile and histogram bins\n"
             "  Stretch % + Stretch - histogram stretch (0 resets to original)\n"
-            "  Blur + Blur value - apply Gaussian blur with given sigma\n"
             "  Show Original - toggle display of the unblurred image\n"
             "  Opacity Slider - mask overlay transparency\n"
-            "  Clear Blur - restore the image without blur\n"
             "  Reverse - invert pixel intensities\n"
             "  Seed % + Seed - create mask seeds above intensity percentile\n"
             "  Diff %/Hist % + Int Grow - expand mask using intensity difference and optional histogram cutoff\n"
