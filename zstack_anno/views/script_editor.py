@@ -210,6 +210,16 @@ class ScriptEditor(QDialog):
                 "black_ridges": True,
             },
         },
+        "Felzenszwalb": {"method": "script_felzenszwalb", "params": {}},
+        "Watershed IFT": {"method": "script_watershed_ift", "params": {}},
+        "scikit-fmm": {
+            "method": "script_scikit_fmm",
+            "params": {"max_distance": 10.0},
+        },
+        "Fast Marching": {
+            "method": "script_fast_marching",
+            "params": {"stopping_value": 10.0},
+        },
         "Shortest Path": {
             "method": "script_shortest_path",
             "params": {"y0": 0, "x0": 0, "y1": 10, "x1": 10},

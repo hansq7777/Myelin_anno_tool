@@ -284,6 +284,18 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             lambda: self.script_skeletonize(algorithm="thin"))
         path_act = linear_menu.addAction("Shortest Path")
         path_act.triggered.connect(self._shortest_path_prompt)
+        felz_act = linear_menu.addAction("Felzenszwalb")
+        felz_act.triggered.connect(
+            lambda: self.script_felzenszwalb())
+        water_act = linear_menu.addAction("Watershed IFT")
+        water_act.triggered.connect(
+            lambda: self.script_watershed_ift())
+        fmm_act = linear_menu.addAction("scikit-fmm")
+        fmm_act.triggered.connect(
+            lambda: self.script_scikit_fmm())
+        march_act = linear_menu.addAction("Fast Marching")
+        march_act.triggered.connect(
+            lambda: self.script_fast_marching())
 
         tool_menu = self.menuBar().addMenu("Tools")
         script_act = tool_menu.addAction("Script Editor")

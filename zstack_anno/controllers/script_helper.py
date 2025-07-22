@@ -241,6 +241,62 @@ class ScriptMixin:
         self.model.set_mask(cur)
         self._update_view()
 
+    def script_felzenszwalb(
+        self: "MainController",
+        scale: float = 100.0,
+        sigma: float = 0.8,
+        min_size: int = 20,
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        labels = morphology_tools.felzenszwalb_slice(
+            img, scale=scale, sigma=sigma, min_size=min_size
+        )
+        mask = (labels > labels.min()).astype(np.uint8)
+        self._push_undo("felzenszwalb")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_watershed_ift(self: "MainController") -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        markers = morphology_tools.label_components(self.model.get_mask())
+        labels = morphology_tools.watershed_ift_slice(img, markers)
+        mask = (labels > 0).astype(np.uint8)
+        self._push_undo("watershed_ift")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_scikit_fmm(
+        self: "MainController", max_distance: float = 10.0
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        seeds = self.model.get_mask()
+        dist = morphology_tools.fmm_distance_slice(img, seeds)
+        mask = (dist <= max_distance).astype(np.uint8)
+        self._push_undo("scikit_fmm")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_fast_marching(
+        self: "MainController", stopping_value: float = 10.0
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        seeds = self.model.get_mask()
+        dist = morphology_tools.sitk_fast_marching_slice(
+            img, seeds, stopping_value=stopping_value
+        )
+        mask = (dist <= stopping_value).astype(np.uint8)
+        self._push_undo("fast_marching")
+        self.model.set_mask(mask)
+        self._update_view()
+
     def script_stretch(self: "MainController", percentile: float = 0.0) -> None:
         if self.model.data is None:
             return
