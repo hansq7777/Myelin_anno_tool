@@ -103,11 +103,13 @@ class SliceCanvas(QGraphicsView):
 class SyncCanvas(SliceCanvas):
     """Canvas that syncs panning and zooming with peers."""
 
-    viewChanged = pyqtSignal(QTransform)
+    viewChanged = pyqtSignal(QTransform, int, int)
 
     def __init__(self) -> None:
         super().__init__()
         self._ignore = False
+        self.horizontalScrollBar().valueChanged.connect(self._emit_transform)
+        self.verticalScrollBar().valueChanged.connect(self._emit_transform)
 
     def wheelEvent(self, event):
         super().wheelEvent(event)
@@ -120,10 +122,16 @@ class SyncCanvas(SliceCanvas):
 
     def _emit_transform(self):
         if not self._ignore:
-            self.viewChanged.emit(self.transform())
+            self.viewChanged.emit(
+                self.transform(),
+                self.horizontalScrollBar().value(),
+                self.verticalScrollBar().value(),
+            )
 
-    def apply_transform(self, tr: QTransform) -> None:
+    def apply_transform(self, tr: QTransform, h: int, v: int) -> None:
         self._ignore = True
         self.setTransform(tr)
+        self.horizontalScrollBar().setValue(h)
+        self.verticalScrollBar().setValue(v)
         self._ignore = False
 

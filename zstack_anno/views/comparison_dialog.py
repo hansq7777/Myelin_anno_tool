@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QScrollArea,
     QWidget,
     QGridLayout,
+    QInputDialog,
 )
 from PyQt5.QtGui import QTransform
 from PyQt5.QtCore import Qt
@@ -154,7 +155,6 @@ class ComparisonDialog(QDialog):
         self.slice_slider.blockSignals(False)
         self.slice_slider.setEnabled(True)
         self._build_panels()
-        self._update_images()
 
     # ---- Processing ----
     def _run(self) -> None:
@@ -195,7 +195,6 @@ class ComparisonDialog(QDialog):
             self.slice_slider.blockSignals(False)
             self.slice_slider.setEnabled(True)
         self._build_panels()
-        self._update_images()
 
     def _build_panels(self) -> None:
         while self.grid.count():
@@ -204,7 +203,30 @@ class ComparisonDialog(QDialog):
             if w:
                 w.deleteLater()
 
-        count = max(self.window_spin.value(), len(self._names) + 1)
+        count = self.window_spin.value()
+
+        # if the requested window count is less than the number of images to
+        # display, ask the user which strategies to hide until it fits
+        while len(self._names) + 1 > count:
+            choice, ok = QInputDialog.getItem(
+                self,
+                "Close Window",
+                "Select a strategy to hide:",
+                self._names,
+                0,
+                False,
+            )
+            if not ok:
+                # user cancelled -> keep all windows
+                count = len(self._names) + 1
+                self.window_spin.setValue(count)
+                break
+            idx = self._names.index(choice)
+            del self._names[idx]
+            del self._preds[idx]
+            del self._metrics[idx]
+
+        count = max(count, len(self._names) + 1)
         self.canvases: List[SyncCanvas] = []
         titles = ["Ground Truth"] + self._names
         titles += [""] * (count - len(titles))
@@ -225,12 +247,15 @@ class ComparisonDialog(QDialog):
         for c in self.canvases:
             c.viewChanged.connect(self._sync_views)
 
-    def _sync_views(self, transform: QTransform) -> None:
+        # after rebuilding panels update the images shown
+        self._update_images()
+
+    def _sync_views(self, transform: QTransform, h: int, v: int) -> None:
         sender = self.sender()
         for c in self.canvases:
             if c is sender:
                 continue
-            c.apply_transform(transform)
+            c.apply_transform(transform, h, v)
 
     def _update_images(self) -> None:
         if self._stack is None or self._gt is None:
