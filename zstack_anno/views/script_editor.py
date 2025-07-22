@@ -182,15 +182,33 @@ class ScriptEditor(QDialog):
         },
         "Frangi Filter": {
             "method": "script_frangi_filter",
-            "params": {"sigma_start": 1.0, "sigma_end": 3.0, "sigma_step": 1.0, "threshold": 0.5},
+            "params": {
+                "sigma_start": 1.0,
+                "sigma_end": 3.0,
+                "sigma_step": 1.0,
+                "threshold": 0.5,
+                "black_ridges": True,
+            },
         },
         "Sato Filter": {
             "method": "script_sato_filter",
-            "params": {"sigma_start": 1.0, "sigma_end": 3.0, "sigma_step": 1.0, "threshold": 0.5},
+            "params": {
+                "sigma_start": 1.0,
+                "sigma_end": 3.0,
+                "sigma_step": 1.0,
+                "threshold": 0.5,
+                "black_ridges": True,
+            },
         },
         "Meijering Filter": {
             "method": "script_meijering_filter",
-            "params": {"sigma_start": 1.0, "sigma_end": 3.0, "sigma_step": 1.0, "threshold": 0.5},
+            "params": {
+                "sigma_start": 1.0,
+                "sigma_end": 3.0,
+                "sigma_step": 1.0,
+                "threshold": 0.5,
+                "black_ridges": True,
+            },
         },
         "Shortest Path": {
             "method": "script_shortest_path",

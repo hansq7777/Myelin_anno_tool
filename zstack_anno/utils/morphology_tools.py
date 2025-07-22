@@ -840,25 +840,40 @@ def _neighbor_count(arr: np.ndarray) -> np.ndarray:
     return count
 
 
-def frangi_filter_slice(slice_: np.ndarray, sigmas=(1, 2, 3)) -> np.ndarray:
+def frangi_filter_slice(
+    slice_: np.ndarray,
+    sigmas: tuple[int | float, ...] = (1, 2, 3),
+    *,
+    black_ridges: bool = True,
+) -> np.ndarray:
     """Enhance line structures using the Frangi vesselness filter."""
     if frangi is None:  # pragma: no cover - optional dependency
         return slice_.astype(float)
-    return frangi(slice_.astype(float), sigmas=sigmas)
+    return frangi(slice_.astype(float), sigmas=sigmas, black_ridges=black_ridges)
 
 
-def sato_filter_slice(slice_: np.ndarray, sigmas=(1, 2, 3)) -> np.ndarray:
+def sato_filter_slice(
+    slice_: np.ndarray,
+    sigmas: tuple[int | float, ...] = (1, 2, 3),
+    *,
+    black_ridges: bool = True,
+) -> np.ndarray:
     """Enhance line structures using the Sato tubeness filter."""
     if sato is None:  # pragma: no cover - optional dependency
         return slice_.astype(float)
-    return sato(slice_.astype(float), sigmas=sigmas)
+    return sato(slice_.astype(float), sigmas=sigmas, black_ridges=black_ridges)
 
 
-def meijering_filter_slice(slice_: np.ndarray, sigmas=(1, 2, 3)) -> np.ndarray:
+def meijering_filter_slice(
+    slice_: np.ndarray,
+    sigmas: tuple[int | float, ...] = (1, 2, 3),
+    *,
+    black_ridges: bool = True,
+) -> np.ndarray:
     """Enhance line structures using the Meijering neuriteness filter."""
     if meijering is None:  # pragma: no cover - optional dependency
         return slice_.astype(float)
-    return meijering(slice_.astype(float), sigmas=sigmas)
+    return meijering(slice_.astype(float), sigmas=sigmas, black_ridges=black_ridges)
 
 
 def thin_slice(slice_: np.ndarray) -> np.ndarray:

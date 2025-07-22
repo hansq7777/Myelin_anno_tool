@@ -25,6 +25,8 @@ from zstack_anno.utils.morphology_tools import (
     skeletonize_slice,
     skeletonize_stack,
     frangi_filter_slice,
+    sato_filter_slice,
+    meijering_filter_slice,
     thin_slice,
     shortest_path_slice,
 )
@@ -315,9 +317,34 @@ def test_skeletonize_stack_3d():
 def test_frangi_filter_slice():
     img = np.zeros((5, 5), dtype=np.uint8)
     img[2, :] = 255
-    result = frangi_filter_slice(img, sigmas=(1,))
+    result = frangi_filter_slice(img, sigmas=(1,), black_ridges=True)
     assert result.shape == img.shape
     assert result.max() > 0
+
+    result_inv = frangi_filter_slice(img, sigmas=(1,), black_ridges=False)
+    assert result_inv.shape == img.shape
+
+
+def test_sato_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    img[2, :] = 255
+    result = sato_filter_slice(img, sigmas=(1,), black_ridges=True)
+    assert result.shape == img.shape
+    assert result.max() > 0
+
+    result_inv = sato_filter_slice(img, sigmas=(1,), black_ridges=False)
+    assert result_inv.shape == img.shape
+
+
+def test_meijering_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    img[2, :] = 255
+    result = meijering_filter_slice(img, sigmas=(1,), black_ridges=True)
+    assert result.shape == img.shape
+    assert result.max() > 0
+
+    result_inv = meijering_filter_slice(img, sigmas=(1,), black_ridges=False)
+    assert result_inv.shape == img.shape
 
 
 def test_thin_slice():
