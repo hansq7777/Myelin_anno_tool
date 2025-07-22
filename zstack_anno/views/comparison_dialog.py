@@ -131,8 +131,11 @@ class ComparisonDialog(QDialog):
         self._metrics.clear()
         self._names.clear()
         n = self._stack.shape[0]
+        # block signals while adjusting to avoid premature _update_images call
+        self.slice_slider.blockSignals(True)
         self.slice_slider.setRange(0, n - 1)
         self.slice_slider.setValue(0)
+        self.slice_slider.blockSignals(False)
         self.slice_slider.setEnabled(True)
         self._build_panels()
         self._update_images()
@@ -169,8 +172,11 @@ class ComparisonDialog(QDialog):
             self._names.append(name)
         if self._stack is not None:
             n = self._stack.shape[0]
+            # block signals while adjusting slider to prevent premature updates
+            self.slice_slider.blockSignals(True)
             self.slice_slider.setRange(0, n - 1)
             self.slice_slider.setValue(0)
+            self.slice_slider.blockSignals(False)
             self.slice_slider.setEnabled(True)
         self._build_panels()
         self._update_images()
