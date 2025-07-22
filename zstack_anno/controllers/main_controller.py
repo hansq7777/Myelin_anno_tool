@@ -279,6 +279,28 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         sato_act.triggered.connect(self._sato_filter_prompt)
         meij_act = linear_menu.addAction("Meijering Filter")
         meij_act.triggered.connect(self._meijering_filter_prompt)
+        ridge_cv2_act = linear_menu.addAction("Ridge CV2")
+        ridge_cv2_act.triggered.connect(
+            lambda: self.script_ridge_cv2_filter()
+        )
+        steger_act = linear_menu.addAction("Steger Ridge")
+        steger_act.triggered.connect(self._steger_prompt)
+        chanvese_act = linear_menu.addAction("Chan Vese")
+        chanvese_act.triggered.connect(self._chan_vese_prompt)
+        ced_act = linear_menu.addAction("CED Filter")
+        ced_act.triggered.connect(self._ced_prompt)
+        tubetk_seg_act = linear_menu.addAction("TubeTK Segment")
+        tubetk_seg_act.triggered.connect(lambda: self.script_tubetk_segment())
+        tubetk_grow_act = linear_menu.addAction("TubeTK Grow")
+        tubetk_grow_act.triggered.connect(lambda: self.script_tubetk_grow())
+        hessian_act = linear_menu.addAction("Hessian Filter")
+        hessian_act.triggered.connect(self._hessian_prompt)
+        gabor_act = linear_menu.addAction("Gabor Filter")
+        gabor_act.triggered.connect(self._gabor_prompt)
+        gabor_cv2_act = linear_menu.addAction("Gabor CV2")
+        gabor_cv2_act.triggered.connect(self._gabor_cv2_prompt)
+        struct_act = linear_menu.addAction("Structure Tensor")
+        struct_act.triggered.connect(self._structure_tensor_prompt)
         thin_act = linear_menu.addAction("Thin Skeleton")
         thin_act.triggered.connect(
             lambda: self.script_skeletonize(algorithm="thin"))
@@ -747,4 +769,97 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         if not ok:
             return
         self.script_shortest_path(y0, x0, y1, x1)
+
+    def _steger_prompt(self) -> None:
+        sigma, ok = QInputDialog.getDouble(self, "Steger Ridge", "Sigma:", 1.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        thresh, ok = QInputDialog.getDouble(self, "Steger Ridge", "Threshold:", 0.5, 0.0, 1.0, 2)
+        if not ok:
+            return
+        self.script_steger_filter(sigma, thresh)
+
+    def _chan_vese_prompt(self) -> None:
+        iters, ok = QInputDialog.getInt(self, "Chan Vese", "Iterations:", 100, 1)
+        if not ok:
+            return
+        smooth, ok = QInputDialog.getInt(self, "Chan Vese", "Smoothing:", 1, 0)
+        if not ok:
+            return
+        l1, ok = QInputDialog.getDouble(self, "Chan Vese", "Lambda1:", 1.0, 0.0, 1e6, 2)
+        if not ok:
+            return
+        l2, ok = QInputDialog.getDouble(self, "Chan Vese", "Lambda2:", 1.0, 0.0, 1e6, 2)
+        if not ok:
+            return
+        self.script_chan_vese(iters, smooth, l1, l2)
+
+    def _ced_prompt(self) -> None:
+        iters, ok = QInputDialog.getInt(self, "CED Filter", "Iterations:", 5, 1)
+        if not ok:
+            return
+        cond, ok = QInputDialog.getDouble(self, "CED Filter", "Conductance:", 3.0, 0.0, 1e6, 2)
+        if not ok:
+            return
+        thresh, ok = QInputDialog.getDouble(self, "CED Filter", "Threshold:", 0.5, 0.0, 1.0, 2)
+        if not ok:
+            return
+        self.script_ced_filter(iters, cond, thresh)
+
+    def _hessian_prompt(self) -> None:
+        start, ok = QInputDialog.getDouble(self, "Hessian Filter", "Sigma start:", 1.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        end, ok = QInputDialog.getDouble(self, "Hessian Filter", "Sigma end:", 3.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        step, ok = QInputDialog.getDouble(self, "Hessian Filter", "Sigma step:", 1.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        thresh, ok = QInputDialog.getDouble(self, "Hessian Filter", "Threshold:", 0.5, 0.0, 1.0, 2)
+        if not ok:
+            return
+        self.script_hessian_filter(start, end, step, thresh)
+
+    def _gabor_prompt(self) -> None:
+        freq, ok = QInputDialog.getDouble(self, "Gabor Filter", "Frequency:", 0.2, 0.0, 1e6, 3)
+        if not ok:
+            return
+        thresh, ok = QInputDialog.getDouble(self, "Gabor Filter", "Threshold:", 0.5, 0.0, 1.0, 2)
+        if not ok:
+            return
+        self.script_gabor_filter(freq, thresh)
+
+    def _gabor_cv2_prompt(self) -> None:
+        ksize, ok = QInputDialog.getInt(self, "Gabor CV2", "Kernel size:", 21, 1)
+        if not ok:
+            return
+        sigma, ok = QInputDialog.getDouble(self, "Gabor CV2", "Sigma:", 5.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        theta, ok = QInputDialog.getDouble(self, "Gabor CV2", "Theta:", 0.0, -np.pi, np.pi, 3)
+        if not ok:
+            return
+        lambd, ok = QInputDialog.getDouble(self, "Gabor CV2", "Lambda:", 10.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        gamma, ok = QInputDialog.getDouble(self, "Gabor CV2", "Gamma:", 0.5, 0.0, 1.0, 2)
+        if not ok:
+            return
+        psi, ok = QInputDialog.getDouble(self, "Gabor CV2", "Psi:", 0.0, -np.pi, np.pi, 3)
+        if not ok:
+            return
+        thresh, ok = QInputDialog.getDouble(self, "Gabor CV2", "Threshold:", 0.5, 0.0, 1.0, 2)
+        if not ok:
+            return
+        self.script_gabor_cv2_filter(ksize, sigma, theta, lambd, gamma, psi, thresh)
+
+    def _structure_tensor_prompt(self) -> None:
+        sigma, ok = QInputDialog.getDouble(self, "Structure Tensor", "Sigma:", 1.0, 0.1, 1e6, 2)
+        if not ok:
+            return
+        thresh, ok = QInputDialog.getDouble(self, "Structure Tensor", "Threshold:", 0.5, 0.0, 1.0, 2)
+        if not ok:
+            return
+        self.script_structure_tensor(sigma, thresh)
 

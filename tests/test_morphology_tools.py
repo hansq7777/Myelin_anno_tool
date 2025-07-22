@@ -31,6 +31,15 @@ from zstack_anno.utils.morphology_tools import (
     meijering_filter_slice,
     thin_slice,
     shortest_path_slice,
+    ridge_filter_cv2_slice,
+    steger_ridge_slice,
+    chan_vese_slice,
+    ced_filter_slice,
+    tubetk_segment_tubes_slice,
+    hessian_filter_slice,
+    gabor_filter_slice,
+    gabor_cv2_slice,
+    structure_tensor_eigen_slice,
 )
 
 
@@ -387,3 +396,58 @@ def test_shortest_path_slice():
     mask = shortest_path_slice(img, (0, 0), (4, 4))
     assert mask[0, 0] == 1
     assert mask[4, 4] == 1
+
+
+def test_ridge_filter_cv2_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = ridge_filter_cv2_slice(img)
+    assert result.shape == img.shape
+
+
+def test_steger_ridge_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = steger_ridge_slice(img, sigma=1.0)
+    assert result.shape == img.shape
+
+
+def test_chan_vese_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    mask = chan_vese_slice(img, iterations=1)
+    assert mask.shape == img.shape
+
+
+def test_ced_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = ced_filter_slice(img, iterations=1)
+    assert result.shape == img.shape
+
+
+def test_tubetk_segment_tubes_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = tubetk_segment_tubes_slice(img)
+    assert result.shape == img.shape
+
+
+def test_hessian_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = hessian_filter_slice(img, sigmas=(1,))
+    assert result.shape == img.shape
+
+
+def test_gabor_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = gabor_filter_slice(img, frequency=0.2)
+    assert result.shape == img.shape
+
+
+def test_gabor_cv2_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = gabor_cv2_slice(img)
+    assert result.shape == img.shape
+
+
+def test_structure_tensor_eigen_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    e1, e2 = structure_tensor_eigen_slice(img, sigma=1.0)
+    assert e1.shape == img.shape
+    assert e2.shape == img.shape

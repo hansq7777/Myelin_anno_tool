@@ -210,6 +210,55 @@ class ScriptEditor(QDialog):
                 "black_ridges": True,
             },
         },
+        "Ridge CV2": {"method": "script_ridge_cv2_filter", "params": {"threshold": 0.5}},
+        "Steger Ridge": {
+            "method": "script_steger_filter",
+            "params": {"sigma": 1.0, "threshold": 0.5},
+        },
+        "Chan Vese": {
+            "method": "script_chan_vese",
+            "params": {
+                "iterations": 100,
+                "smoothing": 1,
+                "lambda1": 1.0,
+                "lambda2": 1.0,
+            },
+        },
+        "CED Filter": {
+            "method": "script_ced_filter",
+            "params": {"iterations": 5, "conductance": 3.0, "threshold": 0.5},
+        },
+        "TubeTK Segment": {"method": "script_tubetk_segment", "params": {"threshold": 0.5}},
+        "TubeTK Grow": {"method": "script_tubetk_grow", "params": {"threshold": 0.5}},
+        "Hessian Filter": {
+            "method": "script_hessian_filter",
+            "params": {
+                "sigma_start": 1.0,
+                "sigma_end": 3.0,
+                "sigma_step": 1.0,
+                "threshold": 0.5,
+            },
+        },
+        "Gabor Filter": {
+            "method": "script_gabor_filter",
+            "params": {"frequency": 0.2, "threshold": 0.5},
+        },
+        "Gabor CV2": {
+            "method": "script_gabor_cv2_filter",
+            "params": {
+                "ksize": 21,
+                "sigma": 5.0,
+                "theta": 0.0,
+                "lambd": 10.0,
+                "gamma": 0.5,
+                "psi": 0.0,
+                "threshold": 0.5,
+            },
+        },
+        "Structure Tensor": {
+            "method": "script_structure_tensor",
+            "params": {"sigma": 1.0, "threshold": 0.5},
+        },
         "Shortest Path": {
             "method": "script_shortest_path",
             "params": {"y0": 0, "x0": 0, "y1": 10, "x1": 10},

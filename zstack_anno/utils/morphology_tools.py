@@ -16,7 +16,7 @@ try:
         medial_axis,
     )
     from skimage.measure import label
-    from skimage.segmentation import flood
+    from skimage.segmentation import flood, morphological_chan_vese
 except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
     logger.warning("scikit-image import failed: %s", exc)
     sk_binary_dilation = None  # type: ignore
@@ -27,15 +27,21 @@ except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
     label = None  # type: ignore
     gaussian = None  # type: ignore
     flood = None  # type: ignore
+    morphological_chan_vese = None  # type: ignore
 else:
     try:
-        from skimage.filters import gaussian, frangi, sato, meijering
+        from skimage.filters import gaussian, frangi, sato, meijering, hessian, gabor
+        from skimage.feature import structure_tensor, structure_tensor_eigenvalues
     except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
         logger.warning("scikit-image.filters import failed: %s", exc)
         gaussian = None  # type: ignore
         frangi = None  # type: ignore
         sato = None  # type: ignore
         meijering = None  # type: ignore
+        hessian = None  # type: ignore
+        gabor = None  # type: ignore
+        structure_tensor = None  # type: ignore
+        structure_tensor_eigenvalues = None  # type: ignore
 
 skeletonize_3d = None
 
@@ -959,3 +965,149 @@ def shortest_path_slice(
     for y, x in coords:
         result[int(y), int(x)] = 1
     return result
+
+
+def ridge_filter_cv2_slice(slice_: np.ndarray) -> np.ndarray:
+    """Detect ridges using OpenCV's RidgeDetectionFilter."""
+    try:  # pragma: no cover - optional dependency
+        import cv2  # type: ignore
+        if hasattr(cv2, "ximgproc") and hasattr(cv2.ximgproc, "RidgeDetectionFilter_create"):
+            flt = cv2.ximgproc.RidgeDetectionFilter_create()
+            return flt.getRidgeFilteredImage(slice_.astype(np.uint8)).astype(float)
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("cv2 ridge filter failed: %s", exc)
+    return slice_.astype(float)
+
+
+def steger_ridge_slice(slice_: np.ndarray, sigma: float = 1.0) -> np.ndarray:
+    """Detect ridges using the ridge-detector package."""
+    try:  # pragma: no cover - optional dependency
+        import ridge_detector  # type: ignore
+        detector = ridge_detector.RidgeDetector(sigma=sigma)
+        return detector.detect_ridges(slice_.astype(float))
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("ridge_detector failed: %s", exc)
+    return slice_.astype(float)
+
+
+def chan_vese_slice(
+    slice_: np.ndarray,
+    iterations: int = 100,
+    smoothing: int = 1,
+    lambda1: float = 1.0,
+    lambda2: float = 1.0,
+    init_level_set: str | np.ndarray = "checkerboard",
+) -> np.ndarray:
+    """Segment ``slice_`` using morphological Chan-Vese evolution."""
+    if morphological_chan_vese is None:  # pragma: no cover - optional dependency
+        return np.zeros_like(slice_, dtype=np.uint8)
+    result = morphological_chan_vese(
+        slice_.astype(float),
+        iterations,
+        init_level_set=init_level_set,
+        smoothing=smoothing,
+        lambda1=lambda1,
+        lambda2=lambda2,
+    )
+    return result.astype(np.uint8)
+
+
+def ced_filter_slice(
+    slice_: np.ndarray,
+    time_step: float = 0.125,
+    conductance: float = 3.0,
+    iterations: int = 5,
+) -> np.ndarray:
+    """Apply coherence-enhancing diffusion (ITK)."""
+    try:  # pragma: no cover - optional dependency
+        import itk  # type: ignore
+        img = itk.image_view_from_array(slice_.astype(np.float32))
+        flt = itk.CoherenceEnhancingDiffusionImageFilter.New(
+            Input=img,
+            TimeStep=time_step,
+            ConductanceParameter=conductance,
+            NumberOfIterations=iterations,
+        )
+        flt.Update()
+        return itk.array_view_from_image(flt.GetOutput()).astype(float)
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("itk CED failed: %s", exc)
+    return slice_.astype(float)
+
+
+def tubetk_segment_tubes_slice(slice_: np.ndarray) -> np.ndarray:
+    """Automatic tube segmentation via TubeTK."""
+    try:  # pragma: no cover - optional dependency
+        import itk  # type: ignore
+        if hasattr(itk, "tubetkSegmentTubes"):
+            result = itk.tubetkSegmentTubes(slice_.astype(np.float32))
+            if hasattr(result, "GetOutput"):
+                result = result.GetOutput()
+            return itk.array_view_from_image(result).astype(np.uint8)
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("TubeTK segment tubes failed: %s", exc)
+    return np.zeros_like(slice_, dtype=np.uint8)
+
+
+def tubetk_path_grow_slice(slice_: np.ndarray, seed_mask: np.ndarray) -> np.ndarray:
+    """Grow paths from seeds using TubeTK if available."""
+    try:  # pragma: no cover - optional dependency
+        import itk  # type: ignore
+        if hasattr(itk, "tubetkExtractTubularGeodesicPaths"):
+            img = itk.image_view_from_array(slice_.astype(np.float32))
+            seed = itk.image_view_from_array(seed_mask.astype(np.uint8))
+            flt = itk.tubetkExtractTubularGeodesicPaths.New(Input=img, SeedMask=seed)
+            flt.Update()
+            return itk.array_view_from_image(flt.GetOutput()).astype(np.uint8)
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("TubeTK path grow failed: %s", exc)
+    return seed_mask.astype(np.uint8)
+
+
+def hessian_filter_slice(
+    slice_: np.ndarray,
+    sigmas: tuple[int | float, ...] = (1, 2, 3),
+) -> np.ndarray:
+    """Enhance ridges using the multiscale Hessian filter."""
+    if hessian is None:  # pragma: no cover - optional dependency
+        return slice_.astype(float)
+    return hessian(slice_.astype(float), sigmas=sigmas)
+
+
+def gabor_filter_slice(slice_: np.ndarray, frequency: float = 0.2) -> np.ndarray:
+    """Apply the Gabor filter from scikit-image."""
+    if gabor is None:  # pragma: no cover - optional dependency
+        return slice_.astype(float)
+    real, _ = gabor(slice_.astype(float), frequency=frequency)
+    return real
+
+
+def gabor_cv2_slice(
+    slice_: np.ndarray,
+    ksize: int = 21,
+    sigma: float = 5.0,
+    theta: float = 0.0,
+    lambd: float = 10.0,
+    gamma: float = 0.5,
+    psi: float = 0.0,
+) -> np.ndarray:
+    """Apply an OpenCV Gabor kernel via ``filter2D``."""
+    try:  # pragma: no cover - optional dependency
+        import cv2  # type: ignore
+        kernel = cv2.getGaborKernel((ksize, ksize), sigma, theta, lambd, gamma, psi, ktype=cv2.CV_32F)
+        return cv2.filter2D(slice_.astype(np.float32), cv2.CV_32F, kernel)
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("cv2 gabor filter failed: %s", exc)
+    return slice_.astype(float)
+
+
+def structure_tensor_eigen_slice(slice_: np.ndarray, sigma: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+    """Return eigenvalues of the structure tensor."""
+    if structure_tensor is None or structure_tensor_eigenvalues is None:  # pragma: no cover - optional dependency
+        shape = slice_.shape
+        return np.zeros(shape, dtype=float), np.zeros(shape, dtype=float)
+    Axx, Axy, Ayy = structure_tensor(slice_.astype(float), sigma=sigma)
+    A_elems = np.array([Axx, Axy, Ayy])
+    eig = structure_tensor_eigenvalues(A_elems)
+    return eig[0], eig[1]
+
