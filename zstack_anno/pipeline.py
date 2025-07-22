@@ -280,7 +280,7 @@ def run_strategy(
         model.index = min(model.index, model.n_slices - 1)
 
     pred = model.masks.astype(np.uint8)
-    gt = tifffile.imread(gt_path).astype(np.uint8)
+    gt = read_stack(gt_path).astype(np.uint8)
     if gt.shape != pred.shape:
         raise ValueError("Ground truth and prediction shape mismatch")
     if slice_idx is not None:
