@@ -176,13 +176,26 @@ def overlay_image(img: np.ndarray, gt: np.ndarray, pred: np.ndarray) -> np.ndarr
     return out
 
 
-def run_strategy(path: str, gt_path: str, steps: Iterable[dict]) -> tuple[np.ndarray, float, float]:
+def run_strategy(
+    path: str,
+    gt_path: str,
+    steps: Iterable[dict],
+    *,
+    slice_idx: int | None = None,
+) -> tuple[np.ndarray, float, float]:
     model = ZStackModel()
     model.load(path)
     model.ensure_masks()
     runner = StrategyRunner(model)
 
-    for idx in range(model.n_slices):
+    if slice_idx is None:
+        indices = range(model.n_slices)
+    else:
+        if not (0 <= slice_idx < model.n_slices):
+            raise ValueError("slice index out of range")
+        indices = [slice_idx]
+
+    for idx in indices:
         model.index = idx
         runner.run_steps(steps)
         # ensure index stays within bounds
@@ -192,7 +205,10 @@ def run_strategy(path: str, gt_path: str, steps: Iterable[dict]) -> tuple[np.nda
     gt = tifffile.imread(gt_path).astype(np.uint8)
     if gt.shape != pred.shape:
         raise ValueError("Ground truth and prediction shape mismatch")
-    precision, recall = compute_metrics(gt, pred)
+    if slice_idx is not None:
+        precision, recall = compute_metrics(gt[slice_idx], pred[slice_idx])
+    else:
+        precision, recall = compute_metrics(gt, pred)
     return pred, precision, recall
 
 

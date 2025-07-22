@@ -15,6 +15,8 @@ from PyQt5.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QSlider,
+    QRadioButton,
+    QButtonGroup,
 )
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt
@@ -76,7 +78,15 @@ class ComparisonDialog(QDialog):
         self.slice_slider = QSlider(Qt.Horizontal)
         self.slice_slider.setEnabled(False)
         self.slice_slider.valueChanged.connect(self._update_images)
+        self.whole_radio = QRadioButton("Whole Z Stack")
+        self.slice_radio = QRadioButton("Single Slice")
+        self.whole_radio.setChecked(True)
+        group = QButtonGroup(self)
+        group.addButton(self.whole_radio)
+        group.addButton(self.slice_radio)
         ctrl_layout.addWidget(self.run_btn)
+        ctrl_layout.addWidget(self.whole_radio)
+        ctrl_layout.addWidget(self.slice_radio)
         ctrl_layout.addWidget(self.slice_slider)
         layout.addLayout(ctrl_layout)
 
@@ -89,11 +99,13 @@ class ComparisonDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(self, "Select Stack", "", "TIFF (*.tif *.tiff *.ome.tif)")
         if path:
             self.stack_edit.setText(path)
+            self._load_preview()
 
     def _choose_gt(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select Ground Truth", "", "TIFF (*.tif *.tiff *.ome.tif)")
         if path:
             self.gt_edit.setText(path)
+            self._load_preview()
 
     def _add_strategy(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select Strategy", "", "JSON (*.json)")
@@ -107,6 +119,24 @@ class ComparisonDialog(QDialog):
         if row >= 0:
             self.strat_list.takeItem(row)
 
+    def _load_preview(self) -> None:
+        """Load stack and ground truth for preview if both paths are set."""
+        self.stack_path = self.stack_edit.text().strip()
+        self.gt_path = self.gt_edit.text().strip()
+        if not os.path.isfile(self.stack_path) or not os.path.isfile(self.gt_path):
+            return
+        self._stack = tifffile.imread(self.stack_path)
+        self._gt = tifffile.imread(self.gt_path).astype(np.uint8)
+        self._preds.clear()
+        self._metrics.clear()
+        self._names.clear()
+        n = self._stack.shape[0]
+        self.slice_slider.setRange(0, n - 1)
+        self.slice_slider.setValue(0)
+        self.slice_slider.setEnabled(True)
+        self._build_panels()
+        self._update_images()
+
     # ---- Processing ----
     def _run(self) -> None:
         self.stack_path = self.stack_edit.text().strip()
@@ -118,6 +148,7 @@ class ComparisonDialog(QDialog):
         self._preds.clear()
         self._metrics.clear()
         self._names.clear()
+        slice_idx = self.slice_slider.value() if self.slice_radio.isChecked() else None
         for i in range(self.strat_list.count()):
             item = self.strat_list.item(i)
             path = item.data(Qt.UserRole)
@@ -127,7 +158,12 @@ class ComparisonDialog(QDialog):
                     steps = json.load(f)
             except Exception:
                 continue
-            pred, prec, rec = run_strategy(self.stack_path, self.gt_path, steps)
+            pred, prec, rec = run_strategy(
+                self.stack_path,
+                self.gt_path,
+                steps,
+                slice_idx=slice_idx,
+            )
             self._preds.append(pred)
             self._metrics.append((prec, rec))
             self._names.append(name)
