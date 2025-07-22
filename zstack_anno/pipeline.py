@@ -164,6 +164,17 @@ def compute_metrics(gt: np.ndarray, pred: np.ndarray) -> tuple[float, float]:
     return precision, recall
 
 
+def read_stack(path: str) -> np.ndarray:
+    """Load a stack from ``path`` and squeeze it to 3-D."""
+    arr = tifffile.imread(path)
+    arr = np.squeeze(arr)
+    if arr.ndim == 4:
+        arr = arr[0]
+    if arr.ndim != 3:
+        raise ValueError("Only 3-D stacks are supported")
+    return arr
+
+
 def overlay_image(img: np.ndarray, gt: np.ndarray, pred: np.ndarray) -> np.ndarray:
     base = ZStackModel._normalize_to_8bit(img)
     out = np.stack([base] * 3, axis=-1)
@@ -222,14 +233,17 @@ def main() -> None:
 
     os.makedirs(args.output, exist_ok=True)
 
+    stack = read_stack(args.stack)
+    gt_stack = read_stack(args.groundtruth).astype(np.uint8)
+
     for strat in args.strategies:
         with open(strat, "r", encoding="utf-8") as f:
             steps = json.load(f)
         pred, precision, recall = run_strategy(args.stack, args.groundtruth, steps)
         name = os.path.splitext(os.path.basename(strat))[0]
         for i in range(pred.shape[0]):
-            img = tifffile.imread(args.stack)[i]
-            gt = tifffile.imread(args.groundtruth)[i]
+            img = stack[i]
+            gt = gt_stack[i]
             overlay = overlay_image(img, gt, pred[i])
             out_path = os.path.join(args.output, f"{name}_slice{i+1}.png")
             tifffile.imwrite(out_path, overlay)

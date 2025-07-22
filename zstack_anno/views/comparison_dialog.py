@@ -21,7 +21,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt
 
-from ..pipeline import run_strategy, overlay_image
+from ..pipeline import run_strategy, overlay_image, read_stack
 
 
 class ComparisonDialog(QDialog):
@@ -125,8 +125,8 @@ class ComparisonDialog(QDialog):
         self.gt_path = self.gt_edit.text().strip()
         if not os.path.isfile(self.stack_path) or not os.path.isfile(self.gt_path):
             return
-        self._stack = tifffile.imread(self.stack_path)
-        self._gt = tifffile.imread(self.gt_path).astype(np.uint8)
+        self._stack = read_stack(self.stack_path)
+        self._gt = read_stack(self.gt_path).astype(np.uint8)
         self._preds.clear()
         self._metrics.clear()
         self._names.clear()
@@ -143,8 +143,8 @@ class ComparisonDialog(QDialog):
         self.gt_path = self.gt_edit.text().strip()
         if not os.path.isfile(self.stack_path) or not os.path.isfile(self.gt_path):
             return
-        self._stack = tifffile.imread(self.stack_path)
-        self._gt = tifffile.imread(self.gt_path).astype(np.uint8)
+        self._stack = read_stack(self.stack_path)
+        self._gt = read_stack(self.gt_path).astype(np.uint8)
         self._preds.clear()
         self._metrics.clear()
         self._names.clear()
