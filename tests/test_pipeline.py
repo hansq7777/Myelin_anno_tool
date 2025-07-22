@@ -45,6 +45,26 @@ def test_run_strategy_single_slice(tmp_path):
     assert recall == 1.0
 
 
+def test_run_strategy_extra_dims(tmp_path):
+    stack = np.zeros((1, 1, 2, 2, 2), dtype=np.uint8)
+    gt = np.zeros_like(stack)
+    stack[0, 0, 1, 0, 1] = 100
+    gt[0, 0, 1, 0, 1] = 1
+
+    stack_path = tmp_path / "stack.tif"
+    gt_path = tmp_path / "gt.tif"
+    tifffile.imwrite(stack_path, stack)
+    tifffile.imwrite(gt_path, gt)
+
+    steps = [{"action": "Threshold Abs", "params": {"value": 50}}]
+    pred, precision, recall = run_strategy(str(stack_path), str(gt_path), steps)
+
+    assert pred.shape == (2, 2, 2)
+    assert np.array_equal(pred[1], gt.squeeze()[1])
+    assert precision == 1.0
+    assert recall == 1.0
+
+
 def test_read_stack_squeezes(tmp_path):
     arr = np.zeros((1, 1, 3, 2, 2), dtype=np.uint8)
     path = tmp_path / "stack.tif"
