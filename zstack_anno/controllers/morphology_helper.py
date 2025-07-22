@@ -259,7 +259,6 @@ class MorphologyMixin:
         img = self.model._extract_slice(self.model.index)
         cur = self.model.get_mask()
         self.cancel_event.clear()
-        self.cancel_btn.setEnabled(True)
         self.int_grow_btn.setEnabled(False)
         self.grow_thread = IntGrowThread(img.astype(float), cur, diff_pct, hist_pct, None, self.cancel_event)
         self.grow_thread.finished.connect(self._int_grow_finished)
@@ -271,20 +270,16 @@ class MorphologyMixin:
         self.model.set_mask(result)
         self._update_view()
         self.int_grow_btn.setEnabled(True)
-        self.cancel_btn.setEnabled(False)
         self.grow_thread = None
 
     def _int_grow_cancelled(self: 'MainController') -> None:
         self.int_grow_btn.setEnabled(True)
-        self.cancel_btn.setEnabled(False)
         self.statusBar().showMessage("Operation cancelled")
         self.grow_thread = None
 
     def _thread_progress(self: 'MainController', mask: np.ndarray, cur: int, total: int) -> None:
         self._progress_update(cur, total, mask)
 
-    def _cancel_operation(self: 'MainController') -> None:
-        self.cancel_event.set()
 
     def _clear_foreground(self: 'MainController') -> None:
         """Reset the entire mask stack to background."""
