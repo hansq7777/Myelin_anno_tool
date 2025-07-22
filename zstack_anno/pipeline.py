@@ -219,16 +219,35 @@ def read_stack(path: str) -> np.ndarray:
     return arr
 
 
-def overlay_image(img: np.ndarray, gt: np.ndarray, pred: np.ndarray) -> np.ndarray:
-    base = ZStackModel._normalize_to_8bit(img)
+def overlay_image(
+    img: np.ndarray, gt: np.ndarray, pred: np.ndarray, alpha: float = 0.5
+) -> np.ndarray:
+    """Return RGB overlay image with semi-transparent masks.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        Base grayscale image.
+    gt : np.ndarray
+        Ground truth mask.
+    pred : np.ndarray
+        Predicted mask.
+    alpha : float, optional
+        Opacity of the colored overlay, by default 0.5.
+    """
+
+    base = ZStackModel._normalize_to_8bit(img).astype(float)
     out = np.stack([base] * 3, axis=-1)
+    overlay = np.zeros_like(out)
     tp = np.logical_and(gt > 0, pred > 0)
     fn = np.logical_and(gt > 0, pred == 0)
     fp = np.logical_and(gt == 0, pred > 0)
-    out[tp] = (0, 255, 0)
-    out[fn] = (0, 0, 255)
-    out[fp] = (255, 0, 0)
-    return out
+    overlay[tp] = (0, 255, 0)
+    overlay[fn] = (0, 0, 255)
+    overlay[fp] = (255, 0, 0)
+    mask = tp | fn | fp
+    out[mask] = (1 - alpha) * out[mask] + alpha * overlay[mask]
+    return out.astype(np.uint8)
 
 
 def run_strategy(
