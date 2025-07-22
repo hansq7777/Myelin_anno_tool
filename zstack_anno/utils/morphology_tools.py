@@ -265,22 +265,39 @@ def remove_small_stack(stack: np.ndarray, min_size: int) -> np.ndarray:
 
 
 def close(mask: np.ndarray) -> np.ndarray:
-    """Fill holes within ``mask`` without merging separate components."""
-    mask_bool = mask > 0
-    if nd_binary_fill_holes is not None:
-        result = nd_binary_fill_holes(mask_bool)
-        return result.astype(mask.dtype)
+    """Fill small holes within ``mask`` without merging separate components."""
 
-    inv = ~mask_bool
-    labels = label_components(inv.astype(np.uint8))
+    mask_bool = mask > 0
+
+    # First fill all holes using scipy if available or the fallback below
+    if nd_binary_fill_holes is not None:
+        filled = nd_binary_fill_holes(mask_bool)
+    else:
+        inv = ~mask_bool
+        labels = label_components(inv.astype(np.uint8))
+        if labels.max() == 0:
+            return mask.copy()
+        border = np.unique(
+            np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])
+        )
+        fill = ~np.isin(labels, border)
+        inv[fill] = False
+        filled = ~inv
+
+    # Identify newly filled holes
+    holes = filled & (~mask_bool)
+    labels = label_components(holes.astype(np.uint8))
     if labels.max() == 0:
-        return mask.copy()
-    border = np.unique(
-        np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])
-    )
-    fill = ~np.isin(labels, border)
-    inv[fill] = False
-    return (~inv).astype(mask.dtype)
+        return filled.astype(mask.dtype)
+
+    # Only keep holes smaller than the area covered by one dilation/erosion
+    MAX_HOLE_SIZE = 1
+    result = mask_bool.copy()
+    for lbl in range(1, labels.max() + 1):
+        if np.sum(labels == lbl) <= MAX_HOLE_SIZE:
+            result[labels == lbl] = True
+
+    return result.astype(mask.dtype)
 
 
 def close_stack(stack: np.ndarray) -> np.ndarray:
