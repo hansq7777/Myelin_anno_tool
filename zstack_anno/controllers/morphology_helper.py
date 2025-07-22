@@ -259,10 +259,16 @@ class MorphologyMixin:
             pct = float(self.seed_thresh_edit.text())
         except ValueError:
             pct = 90.0
+        try:
+            pix_pct = float(self.seed_pix_edit.text())
+        except ValueError:
+            pix_pct = 1.0
         self._push_undo("seed")
         img = self.model._extract_slice(self.model.index)
         cur = self.model.get_mask()
-        seeds = morphology_tools.sample_seeds(img, pct, num_seeds=20000)
+        seeds = morphology_tools.sample_seeds(
+            img, pct, pixel_percent=pix_pct
+        )
         cur = cur.copy()
         cur[seeds > 0] = 1
         self.model.set_mask(cur)

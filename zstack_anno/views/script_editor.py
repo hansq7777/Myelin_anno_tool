@@ -159,7 +159,10 @@ class ScriptEditor(QDialog):
         "Filter Small": {"method": "script_filter_small", "params": {"threshold": 100}},
         "Threshold Abs": {"method": "script_threshold_abs", "params": {"value": 0.0}},
         "Threshold Norm": {"method": "script_threshold_norm", "params": {"percent": 50.0}},
-        "Seed": {"method": "script_seed", "params": {"percentile": 85.0}},
+        "Seed": {
+            "method": "script_seed",
+            "params": {"percentile": 85.0, "pixel_percent": 1.0},
+        },
         "Intensity Grow": {
             "method": "script_int_grow",
             "params": {"diff_pct": 50.0, "hist_pct": 20.0, "force_pct": None, "limit": 30000},

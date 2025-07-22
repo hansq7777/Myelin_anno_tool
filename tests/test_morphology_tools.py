@@ -162,7 +162,7 @@ def test_remove_mask_background_global_thresh():
 
 def test_sample_seeds():
     img = np.arange(100, dtype=np.uint8).reshape(10, 10)
-    seeds = sample_seeds(img, 90, num_seeds=5)
+    seeds = sample_seeds(img, 90, pixel_percent=5)
     assert seeds.sum() == 5
     assert np.all(img[seeds > 0] > np.percentile(img, 90))
 
