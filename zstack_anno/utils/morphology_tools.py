@@ -56,12 +56,14 @@ def _load_skeletonize_3d() -> Callable | None:
 try:
     from scipy.ndimage import binary_dilation as nd_binary_dilation
     from scipy.ndimage import binary_erosion as nd_binary_erosion
+    from scipy.ndimage import binary_fill_holes as nd_binary_fill_holes
     from scipy.ndimage import label as nd_label
     from scipy.ndimage import labeled_comprehension
 except ImportError as exc:  # pragma: no cover - scipy may be unavailable
     logger.warning("scipy.ndimage import failed: %s", exc)
     nd_binary_dilation = None  # type: ignore
     nd_binary_erosion = None  # type: ignore
+    nd_binary_fill_holes = None  # type: ignore
     nd_label = None  # type: ignore
     labeled_comprehension = None  # type: ignore
 
@@ -260,6 +262,30 @@ def remove_small(mask: np.ndarray, min_size: int) -> np.ndarray:
 def remove_small_stack(stack: np.ndarray, min_size: int) -> np.ndarray:
     """Apply ``remove_small`` to every slice of a stack."""
     return np.stack([remove_small(slice_, min_size) for slice_ in stack])
+
+
+def close(mask: np.ndarray) -> np.ndarray:
+    """Fill holes within ``mask`` without merging separate components."""
+    mask_bool = mask > 0
+    if nd_binary_fill_holes is not None:
+        result = nd_binary_fill_holes(mask_bool)
+        return result.astype(mask.dtype)
+
+    inv = ~mask_bool
+    labels = label_components(inv.astype(np.uint8))
+    if labels.max() == 0:
+        return mask.copy()
+    border = np.unique(
+        np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])
+    )
+    fill = ~np.isin(labels, border)
+    inv[fill] = False
+    return (~inv).astype(mask.dtype)
+
+
+def close_stack(stack: np.ndarray) -> np.ndarray:
+    """Apply ``close`` to every slice of a stack."""
+    return np.stack([close(s) for s in stack])
 
 
 def threshold_absolute(slice_: np.ndarray, value: float) -> np.ndarray:
