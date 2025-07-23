@@ -25,10 +25,12 @@ class SliceCanvas(QGraphicsView):
         """显示图像，支持灰度或 RGB."""
         if arr.ndim == 2:
             h, w = arr.shape
-            img = QImage(arr.data, w, h, QImage.Format_Grayscale8)
+            arr = np.ascontiguousarray(arr)
+            img = QImage(arr.data, w, h, arr.strides[0], QImage.Format_Grayscale8)
         elif arr.ndim == 3 and arr.shape[2] == 3:
             h, w, _ = arr.shape
-            img = QImage(arr.data, w, h, QImage.Format_RGB888)
+            arr = np.ascontiguousarray(arr)
+            img = QImage(arr.data, w, h, arr.strides[0], QImage.Format_RGB888)
         else:
             raise ValueError("只支持 2-D 灰度图或 3-D RGB 图像")
         pix = QPixmap.fromImage(img)
@@ -90,7 +92,8 @@ class SliceCanvas(QGraphicsView):
         rgba[..., 0] = 255  # 红色
         alpha = int(255 * self._mask_opacity)
         rgba[..., 3] = (mask > 0).astype(np.uint8) * alpha
-        img = QImage(rgba.data, w, h, QImage.Format_RGBA8888)
+        rgba = np.ascontiguousarray(rgba)
+        img = QImage(rgba.data, w, h, rgba.strides[0], QImage.Format_RGBA8888)
         pix = QPixmap.fromImage(img)
 
         if self._mask_item is None:
