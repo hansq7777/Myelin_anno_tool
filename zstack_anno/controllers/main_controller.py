@@ -339,8 +339,17 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         script_act.setShortcuts(["Alt+E", "Ctrl+E", "Meta+E"])
         compare_act = tool_menu.addAction("Strategy Comparison")
         compare_act.triggered.connect(self._open_comparison_dialog)
+        # Support Command+R and Option+R on macOS, and Alt+R elsewhere.
+        # Ctrl+R is mapped to Command+R automatically on macOS, so include
+        # it alongside Alt/Meta for cross-platform compatibility.
+        compare_act.setShortcuts(["Alt+R", "Ctrl+R", "Meta+R"])
+
         validate_act = tool_menu.addAction("Validation Viewer")
         validate_act.triggered.connect(self._open_validation_dialog)
+        # Support Command+T and Option+T on macOS, and Alt+T elsewhere.
+        # Ctrl+T is mapped to Command+T automatically on macOS, so include
+        # it alongside Alt/Meta for cross-platform compatibility.
+        validate_act.setShortcuts(["Alt+T", "Ctrl+T", "Meta+T"])
 
         help_menu = self.menuBar().addMenu("Help")
         help_act = help_menu.addAction("Shortcuts && Features")
