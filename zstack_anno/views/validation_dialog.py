@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QTransform
 from PyQt5.QtCore import Qt
 
-from ..pipeline import overlay_mask, read_stack
+from ..pipeline import overlay_mask, overlay_image, compute_metrics, read_stack
 from ..views.canvas import SyncCanvas
 from ..models.zstack_model import ZStackModel
 
@@ -66,6 +66,7 @@ class ValidationDialog(QDialog):
         self._masks: List[np.ndarray] = []
         self._names: List[str] = []
         self._metas: List[Optional[dict]] = []
+        self._metrics: List[Optional[tuple[float, float]]] = []
 
         layout = QVBoxLayout(self)
 
@@ -112,6 +113,9 @@ class ValidationDialog(QDialog):
         self.window_spin.setValue(4)
         self.window_spin.valueChanged.connect(self._build_panels)
         ctrl_layout.addWidget(self.window_spin)
+        self.stats_btn = QPushButton("Whole Stack Stats")
+        self.stats_btn.clicked.connect(self._show_stats)
+        ctrl_layout.addWidget(self.stats_btn)
         layout.addLayout(ctrl_layout)
 
         self.scroll = QScrollArea()
@@ -120,6 +124,24 @@ class ValidationDialog(QDialog):
         self.grid = QGridLayout(self.grid_widget)
         self.scroll.setWidget(self.grid_widget)
         layout.addWidget(self.scroll)
+
+        self.legend_widget = QWidget()
+        legend_layout_inner = QHBoxLayout(self.legend_widget)
+        for text, color in [
+            ("TP", (0, 158, 115)),
+            ("FP", (213, 94, 0)),
+            ("FN", (0, 114, 178)),
+        ]:
+            swatch = QLabel()
+            swatch.setFixedSize(12, 12)
+            swatch.setStyleSheet(
+                f"background-color: rgb({color[0]}, {color[1]}, {color[2]});"
+            )
+            legend_layout_inner.addWidget(swatch)
+            legend_layout_inner.addWidget(QLabel(text))
+        legend_layout_inner.addStretch()
+        layout.addWidget(self.legend_widget)
+        self.legend_widget.hide()
 
     # ---- UI helpers ----
     def _choose_stack(self) -> None:
@@ -194,10 +216,12 @@ class ValidationDialog(QDialog):
         self._masks.clear()
         self._names.clear()
         self._metas.clear()
+        self._metrics.clear()
         if self._gt is not None:
             self._masks.append(self._gt)
             self._names.append("Ground Truth")
             self._metas.append({"strategy": "Ground Truth"})
+            self._metrics.append((1.0, 1.0))
         for i in range(self.mask_list.count()):
             path = self.mask_list.item(i).data(Qt.UserRole)
             if not path or not os.path.isfile(path):
@@ -219,7 +243,12 @@ class ValidationDialog(QDialog):
             self._masks.append(arr)
             self._names.append(name)
             self._metas.append(meta)
+            if self._gt is not None and arr.shape == self._gt.shape:
+                self._metrics.append(compute_metrics(self._gt, arr))
+            else:
+                self._metrics.append(None)
         self._build_panels()
+        self.legend_widget.setVisible(self._gt is not None and len(self._masks) > 1)
 
     # ---- Display helpers ----
     def _build_panels(self) -> None:
@@ -232,7 +261,11 @@ class ValidationDialog(QDialog):
         self.canvases: List[MetaCanvas] = []
         for i in range(count):
             canvas = MetaCanvas()
-            lbl = QLabel(self._names[i] if i < len(self._names) else "")
+            label_text = self._names[i] if i < len(self._names) else ""
+            if i > 0 and i < len(self._metrics) and self._metrics[i] is not None:
+                p, r = self._metrics[i]
+                label_text += f"\nP:{p:.2f} R:{r:.2f}"
+            lbl = QLabel(label_text)
             lbl.setAlignment(Qt.AlignHCenter)
             widget = QWidget()
             wrapper = QVBoxLayout(widget)
@@ -260,9 +293,31 @@ class ValidationDialog(QDialog):
         img = self._stack[idx]
         for i, canvas in enumerate(self.canvases):
             if i < len(self._masks):
-                overlay = overlay_mask(img, self._masks[i][idx], alpha=0.4)
+                if i == 0 or self._gt is None:
+                    overlay = overlay_mask(img, self._masks[i][idx], alpha=0.4)
+                else:
+                    overlay = overlay_image(img, self._gt[idx], self._masks[i][idx], alpha=0.4)
                 canvas.set_image(overlay)
             else:
-                canvas.set_image(np.stack([ZStackModel._normalize_to_8bit(img)] * 3, axis=-1))
+                canvas.set_image(
+                    np.stack([ZStackModel._normalize_to_8bit(img)] * 3, axis=-1)
+                )
             canvas.setToolTip("")
+
+    def _show_stats(self) -> None:
+        if self._gt is None or len(self._masks) <= 1:
+            QMessageBox.information(
+                self,
+                "Statistics",
+                "Load ground truth and at least one mask to compute stats.",
+            )
+            return
+        lines = []
+        for name, mask in zip(self._names[1:], self._masks[1:]):
+            if mask.shape != self._gt.shape:
+                lines.append(f"{name}: shape mismatch")
+                continue
+            p, r = compute_metrics(self._gt, mask)
+            lines.append(f"{name}: precision={p:.3f} recall={r:.3f}")
+        QMessageBox.information(self, "Statistics", "\n".join(lines))
 

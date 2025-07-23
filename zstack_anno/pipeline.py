@@ -365,9 +365,9 @@ def overlay_image(
     tp = np.logical_and(gt > 0, pred > 0)
     fn = np.logical_and(gt > 0, pred == 0)
     fp = np.logical_and(gt == 0, pred > 0)
-    overlay[tp] = (0, 255, 0)
-    overlay[fn] = (0, 0, 255)
-    overlay[fp] = (255, 0, 0)
+    overlay[tp] = (0, 158, 115)  # green
+    overlay[fn] = (0, 114, 178)  # blue
+    overlay[fp] = (213, 94, 0)   # orange
     mask = tp | fn | fp
     out[mask] = (1 - alpha) * out[mask] + alpha * overlay[mask]
     return out.astype(np.uint8)
@@ -379,7 +379,7 @@ def overlay_mask(img: np.ndarray, mask: np.ndarray, alpha: float = 0.5) -> np.nd
     base = ZStackModel._normalize_to_8bit(img).astype(float)
     out = np.stack([base] * 3, axis=-1)
     overlay = np.zeros_like(out)
-    overlay[mask > 0] = (0, 255, 0)
+    overlay[mask > 0] = (0, 158, 115)
     out[mask > 0] = (1 - alpha) * out[mask > 0] + alpha * overlay[mask > 0]
     return out.astype(np.uint8)
 
