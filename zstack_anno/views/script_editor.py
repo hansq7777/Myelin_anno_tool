@@ -285,7 +285,6 @@ class ScriptEditor(QDialog):
             "method": "script_shortest_path",
             "params": {"y0": 0, "x0": 0, "y1": 10, "x1": 10},
         },
-        "Save": {"method": "script_save", "params": {}},
     }
 
     def __init__(self, controller):
@@ -574,7 +573,8 @@ class ScriptEditor(QDialog):
         while True:
             slice_start = self.controller.model.index
             elapsed, skipped = self.run_script()
-            self.controller.script_save()
+            if self.controller.model.mask_path:
+                self.controller.model.save_slice()
             print(
                 f"Slice {slice_start + 1}/{self.controller.model.n_slices} finished in {elapsed:.3f}s"
             )
@@ -641,6 +641,25 @@ class ScriptEditor(QDialog):
             start_idx = self.controller.model.index
             end_idx = self.controller.model.n_slices - 1
 
+        if self.controller.model.mask_path is None:
+            strat, ok = QInputDialog.getText(self, "Strategy Name", "Strategy name:")
+            if not ok:
+                return
+            base = os.path.splitext(os.path.basename(self.controller.model.path))[0]
+            default = os.path.join(
+                os.path.dirname(self.controller.model.path), f"{base}_{strat}.tif"
+            )
+            mask_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Segmentation File",
+                default,
+                "TIFF Images (*.tif)",
+            )
+            if not mask_path:
+                return
+            meta = {"strategy": strat, "steps": self.get_script()}
+            self.controller.model.create_blank_masks(mask_path, metadata=meta)
+
         self._run_stack_range(start_idx, end_idx)
         QMessageBox.information(self, "Run Stack", "Stack segmentation complete")
 
@@ -692,6 +711,10 @@ class ScriptEditor(QDialog):
         if not save_folder:
             return
 
+        strat, ok = QInputDialog.getText(self, "Strategy Name", "Strategy name:")
+        if not ok:
+            return
+
         for path in file_list:
             self.controller.model.load(path)
             self.controller.slider.setRange(
@@ -700,9 +723,10 @@ class ScriptEditor(QDialog):
             # ensure navigation works when processing multiple stacks
             self.controller.slider.setEnabled(True)
             self.controller._update_view(reset_view=True)
-            mask_name = os.path.splitext(os.path.basename(path))[0] + "_mask.tif"
+            mask_name = os.path.splitext(os.path.basename(path))[0] + f"_{strat}.tif"
             mask_path = os.path.join(save_folder, mask_name)
-            self.controller.model.create_blank_masks(mask_path)
+            meta = {"strategy": strat, "steps": self.get_script()}
+            self.controller.model.create_blank_masks(mask_path, metadata=meta)
             start = min(start_idx, self.controller.model.n_slices - 1)
             self._run_stack_range(start, self.controller.model.n_slices - 1)
             if self._stopped:

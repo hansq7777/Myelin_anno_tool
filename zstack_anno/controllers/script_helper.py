@@ -478,4 +478,9 @@ class ScriptMixin:
         self._prev_slice()
 
     def script_save(self: "MainController") -> None:
-        self._quick_save_masks()
+        if self.model.masks is None:
+            return
+        if self.model.mask_path is None:
+            self._save_masks()
+        else:
+            self.model.save_slice()
