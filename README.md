@@ -50,6 +50,17 @@ To execute the test suite:
 pytest
 ```
 
+### Extracting CZI metadata
+
+Stage positions and pixel sizes can be retrieved from a `.czi` file with:
+
+```bash
+python -m zstack_anno.utils.czi_utils myfile.czi -o meta.json
+```
+
+The generated JSON lists the physical resolution (`pixel_size`), the number of
+stacks captured (`stack_count`) and the stage coordinates for each stack.
+
 ### Shortcuts
 
 - `P` – toggle brush painting

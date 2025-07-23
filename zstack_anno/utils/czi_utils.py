@@ -197,3 +197,58 @@ def czi_to_tiff(path: str, out_path: str) -> str:
 
     tifffile.imwrite(out_path, arr, ome=metadata)
     return out_path
+
+
+def extract_czi_metadata(path: str, out_path: str | None = None) -> Dict[str, object]:
+    """Extract stage coordinates and pixel size from a CZI file.
+
+    Parameters
+    ----------
+    path:
+        Path to the ``.czi`` file.
+    out_path:
+        Optional JSON file to write the extracted information.
+
+    Returns
+    -------
+    dict
+        Parsed metadata as returned by :func:`read_czi_metadata`.
+    """
+
+    info = read_czi_metadata(path)
+    if out_path is not None:
+        import json
+
+        with open(out_path, "w", encoding="utf-8") as fh:
+            json.dump(info, fh, indent=2)
+
+    return info
+
+
+def _main() -> None:
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(description="Extract CZI metadata")
+    parser.add_argument("czi_file", help="Path to .czi file")
+    parser.add_argument(
+        "-o",
+        "--out",
+        dest="out_path",
+        help="Optional path to write metadata JSON",
+    )
+
+    args = parser.parse_args()
+
+    try:
+        info = extract_czi_metadata(args.czi_file, args.out_path)
+    except CziNotSupportedError as exc:  # pragma: no cover - runtime protection
+        parser.error(str(exc))
+        return
+
+    if args.out_path is None:
+        print(json.dumps(info, indent=2))
+
+
+if __name__ == "__main__":  # pragma: no cover - manual invocation only
+    _main()
