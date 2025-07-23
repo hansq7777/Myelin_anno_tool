@@ -22,6 +22,7 @@ from ..models.zstack_model import ZStackModel
 from ..views.canvas import SliceCanvas
 from ..views.script_editor import ScriptEditor
 from ..views.comparison_dialog import ComparisonDialog
+from ..views.validation_dialog import ValidationDialog
 from ..utils import morphology_tools
 from ..utils.dialogs import question_with_shortcuts
 from ..utils import config
@@ -338,6 +339,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         script_act.setShortcuts(["Alt+E", "Ctrl+E", "Meta+E"])
         compare_act = tool_menu.addAction("Strategy Comparison")
         compare_act.triggered.connect(self._open_comparison_dialog)
+        validate_act = tool_menu.addAction("Validation Viewer")
+        validate_act.triggered.connect(self._open_validation_dialog)
 
         help_menu = self.menuBar().addMenu("Help")
         help_act = help_menu.addAction("Shortcuts && Features")
@@ -696,6 +699,11 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
     def _open_comparison_dialog(self) -> None:
         """Open the strategy comparison dialog."""
         dialog = ComparisonDialog(self)
+        dialog.exec_()
+
+    def _open_validation_dialog(self) -> None:
+        """Open the validation viewer dialog."""
+        dialog = ValidationDialog(self)
         dialog.exec_()
 
     def _frangi_filter_prompt(self) -> None:
