@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QTransform
 from PyQt5.QtCore import Qt
 
-from ..pipeline import run_strategy, overlay_image, read_stack
+from ..pipeline import run_strategy, overlay_mask, read_stack
 from ..views.canvas import SyncCanvas
 from ..models.zstack_model import ZStackModel
 
@@ -40,7 +40,6 @@ class ComparisonDialog(QDialog):
         self.stack_path = ""
         self.gt_path = ""
         self._preds: List[np.ndarray] = []
-        self._metrics: List[tuple[float, float]] = []
         self._names: List[str] = []
         self._stack: np.ndarray | None = None
         self._gt: np.ndarray | None = None
@@ -145,7 +144,6 @@ class ComparisonDialog(QDialog):
         self._stack = read_stack(self.stack_path)
         self._gt = read_stack(self.gt_path).astype(np.uint8)
         self._preds.clear()
-        self._metrics.clear()
         self._names.clear()
         n = self._stack.shape[0]
         # block signals while adjusting to avoid premature _update_images call
@@ -165,36 +163,60 @@ class ComparisonDialog(QDialog):
         self._stack = read_stack(self.stack_path)
         self._gt = read_stack(self.gt_path).astype(np.uint8)
         self._preds.clear()
-        self._metrics.clear()
         self._names.clear()
-        slice_idx = self.slice_slider.value() if self.slice_radio.isChecked() else None
+
+        paths: list[str] = []
         for i in range(self.strat_list.count()):
             item = self.strat_list.item(i)
             path = item.data(Qt.UserRole)
-            name = os.path.splitext(os.path.basename(path))[0]
+            if path:
+                paths.append(path)
+                name = os.path.splitext(os.path.basename(path))[0]
+                self._names.append(name)
+
+        slice_idx = self.slice_slider.value() if self.slice_radio.isChecked() else None
+        self._build_panels()
+
+        for si, path in enumerate(paths):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     steps = json.load(f)
             except Exception:
                 continue
-            pred, prec, rec = run_strategy(
+
+            pred, _, _ = run_strategy(
                 self.stack_path,
                 self.gt_path,
                 steps,
                 slice_idx=slice_idx,
+                step_callback=lambda m, sidx, step_idx, s=si: self._live_update(s, m, sidx),
             )
+
             self._preds.append(pred)
-            self._metrics.append((prec, rec))
-            self._names.append(name)
+
+            base = os.path.splitext(os.path.basename(self.stack_path))[0]
+            if slice_idx is None:
+                default = os.path.join(os.path.dirname(self.stack_path), f"{base}_{self._names[si]}.tif")
+            else:
+                default = os.path.join(
+                    os.path.dirname(self.stack_path), f"{base}_slice{slice_idx + 1}_{self._names[si]}.tif"
+                )
+            save_path, _ = QFileDialog.getSaveFileName(self, "Save Result", default, "TIFF Images (*.tif)")
+            if save_path:
+                if slice_idx is None:
+                    tifffile.imwrite(save_path, pred)
+                else:
+                    tifffile.imwrite(save_path, pred[slice_idx])
+
         if self._stack is not None:
             n = self._stack.shape[0]
-            # block signals while adjusting slider to prevent premature updates
             self.slice_slider.blockSignals(True)
             self.slice_slider.setRange(0, n - 1)
             self.slice_slider.setValue(0)
             self.slice_slider.blockSignals(False)
             self.slice_slider.setEnabled(True)
-        self._build_panels()
+
+        self._update_images()
 
     def _build_panels(self) -> None:
         while self.grid.count():
@@ -207,7 +229,7 @@ class ComparisonDialog(QDialog):
 
         # if the requested window count is less than the number of images to
         # display, ask the user which strategies to hide until it fits
-        while len(self._names) + 1 > count:
+        while len(self._names) > count:
             choice, ok = QInputDialog.getItem(
                 self,
                 "Close Window",
@@ -218,18 +240,16 @@ class ComparisonDialog(QDialog):
             )
             if not ok:
                 # user cancelled -> keep all windows
-                count = len(self._names) + 1
+                count = len(self._names)
                 self.window_spin.setValue(count)
                 break
             idx = self._names.index(choice)
             del self._names[idx]
             del self._preds[idx]
-            del self._metrics[idx]
 
-        count = max(count, len(self._names) + 1)
+        count = max(count, len(self._names))
         self.canvases: List[SyncCanvas] = []
-        titles = ["Ground Truth"] + self._names
-        titles += [""] * (count - len(titles))
+        titles = self._names + [""] * (count - len(self._names))
 
         for i in range(count):
             canvas = SyncCanvas()
@@ -258,22 +278,31 @@ class ComparisonDialog(QDialog):
             c.apply_transform(transform, h, v)
 
     def _update_images(self) -> None:
-        if self._stack is None or self._gt is None:
+        if self._stack is None:
             return
         idx = self.slice_slider.value()
         img = self._stack[idx]
-        gt_slice = self._gt[idx]
-        # first panel: GT overlay
-        base = overlay_image(img, gt_slice, gt_slice, alpha=0.4)
-        self.canvases[0].set_image(base)
-        for i in range(1, len(self.canvases)):
-            if i - 1 < len(self._preds):
-                overlay = overlay_image(img, gt_slice, self._preds[i - 1][idx], alpha=0.4)
-                self.canvases[i].set_image(overlay)
-                prec, rec = self._metrics[i - 1]
-                tooltip = f"precision={prec:.3f} recall={rec:.3f}"
+        for i, canvas in enumerate(self.canvases):
+            if i < len(self._preds):
+                overlay = overlay_mask(img, self._preds[i][idx], alpha=0.4)
+                canvas.set_image(overlay)
             else:
-                self.canvases[i].set_image(np.stack([ZStackModel._normalize_to_8bit(img)] * 3, axis=-1))
-                tooltip = ""
-            self.canvases[i].setToolTip(tooltip)
+                canvas.set_image(
+                    np.stack([ZStackModel._normalize_to_8bit(img)] * 3, axis=-1)
+                )
+            canvas.setToolTip("")
+
+    def _live_update(self, strat_idx: int, masks: np.ndarray, slice_idx: int) -> None:
+        """Update a canvas during strategy execution."""
+        if self._stack is None or strat_idx >= len(self.canvases):
+            return
+        if strat_idx < len(self._preds):
+            self._preds[strat_idx] = masks
+        else:
+            # when called before final append
+            self._preds.append(masks)
+        if slice_idx == self.slice_slider.value():
+            img = self._stack[slice_idx]
+            overlay = overlay_mask(img, masks[slice_idx], alpha=0.4)
+            self.canvases[strat_idx].set_image(overlay)
 
