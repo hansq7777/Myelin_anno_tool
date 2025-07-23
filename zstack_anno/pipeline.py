@@ -34,6 +34,16 @@ class StrategyRunner:
         "Watershed IFT": "watershed_ift",
         "scikit-fmm": "scikit_fmm",
         "Fast Marching": "fast_marching",
+        "OpenCV Ridge": "opencv_ridge",
+        "Steger Ridge": "steger_ridge",
+        "Chan-Vese": "chan_vese",
+        "CED Filter": "ced_filter",
+        "TubeTK Tubes": "tubetk_segment",
+        "TubeTK Seed Path": "tubetk_seed_path",
+        "Hessian Filter": "hessian_filter",
+        "Gabor Filter": "gabor_filter",
+        "OpenCV Gabor": "cv_gabor_filter",
+        "Structure Tensor": "structure_tensor",
     }
 
     def __init__(self, model: ZStackModel) -> None:
@@ -180,6 +190,99 @@ class StrategyRunner:
             img, seeds, stopping_value=stopping_value
         )
         self.model.set_mask((dist <= stopping_value).astype(np.uint8))
+
+    def opencv_ridge(self, threshold: float = 0.5) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        resp = morphology_tools.opencv_ridge_filter_slice(img)
+        self.model.set_mask((resp > threshold).astype(np.uint8))
+
+    def steger_ridge(self, sigma: float = 1.0, threshold: float = 0.5) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        resp = morphology_tools.steger_ridge_filter_slice(img, sigma=sigma)
+        self.model.set_mask((resp > threshold).astype(np.uint8))
+
+    def chan_vese(
+        self,
+        iterations: int = 50,
+        smoothing: int = 1,
+        lambda1: float = 1.0,
+        lambda2: float = 1.0,
+    ) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        mask = morphology_tools.chan_vese_slice(
+            img,
+            iterations=iterations,
+            smoothing=smoothing,
+            lambda1=lambda1,
+            lambda2=lambda2,
+        )
+        self.model.set_mask(mask)
+
+    def ced_filter(self, iterations: int = 5) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        resp = morphology_tools.ced_filter_slice(img, iterations=iterations)
+        self.model.set_mask((resp > resp.mean()).astype(np.uint8))
+
+    def tubetk_segment(self) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        mask = morphology_tools.tubetk_segment_tubes_slice(img)
+        self.model.set_mask(mask)
+
+    def tubetk_seed_path(self) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        seeds = self.model.get_mask()
+        mask = morphology_tools.tubetk_seeded_path_slice(img, seeds)
+        self.model.set_mask(mask)
+
+    def hessian_filter(
+        self,
+        sigma_start: float = 1.0,
+        sigma_end: float = 3.0,
+        sigma_step: float = 1.0,
+        threshold: float = 0.5,
+        black_ridges: bool = True,
+    ) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        sigmas = np.arange(sigma_start, sigma_end + sigma_step, sigma_step)
+        resp = morphology_tools.hessian_filter_slice(
+            img, sigmas=sigmas, black_ridges=black_ridges
+        )
+        self.model.set_mask((resp > threshold).astype(np.uint8))
+
+    def gabor_filter(self, frequency: float = 0.1, theta: float = 0.0) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        resp = morphology_tools.gabor_filter_slice(img, frequency=frequency, theta=theta)
+        self.model.set_mask((resp > resp.mean()).astype(np.uint8))
+
+    def cv_gabor_filter(
+        self,
+        ksize: int = 21,
+        sigma: float = 5.0,
+        theta: float = 0.0,
+        lambd: float = 10.0,
+        gamma: float = 0.5,
+        psi: float = 0.0,
+    ) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        resp = morphology_tools.cv_gabor_filter_slice(
+            img, ksize=ksize, sigma=sigma, theta=theta, lambd=lambd, gamma=gamma, psi=psi
+        )
+        self.model.set_mask((resp > resp.mean()).astype(np.uint8))
+
+    def structure_tensor(self, sigma: float = 1.0, threshold: float = 0.5) -> None:
+        self.model.ensure_masks()
+        img = self.model._extract_slice(self.model.index)
+        resp = morphology_tools.structure_tensor_eigen_slice(img, sigma=sigma)
+        self.model.set_mask((resp > threshold).astype(np.uint8))
 
     def run_steps(self, steps: Iterable[dict]) -> bool:
         """Run ``steps`` once. Return ``False`` if aborted early."""
