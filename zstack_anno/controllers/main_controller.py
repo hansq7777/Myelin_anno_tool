@@ -207,6 +207,9 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         open_act.triggered.connect(self._open_file)
         open_act.setShortcuts(["Ctrl+O", "Meta+O"])
 
+        import_czi_act = file_menu.addAction("Import CZI…")
+        import_czi_act.triggered.connect(self._import_czi_file)
+
         new_mask_act = file_menu.addAction("New Mask Stack…")
         new_mask_act.triggered.connect(self._create_masks)
         new_mask_act.setShortcuts(["Ctrl+Shift+M", "Meta+Shift+M"])
@@ -226,6 +229,9 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
 
         save_mask_act = file_menu.addAction("Save Masks…")
         save_mask_act.triggered.connect(self._save_masks)
+
+        info_act = file_menu.addAction("Stack Info")
+        info_act.triggered.connect(self._show_stack_info)
 
         edit_menu = self.menuBar().addMenu("Edit")
         undo_act = edit_menu.addAction("Undo")

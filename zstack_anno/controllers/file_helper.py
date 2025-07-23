@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox, QLabel
 import numpy as np
 from ..utils.dialogs import question_with_shortcuts
 from ..utils import config
+from ..utils.czi_utils import split_czi_file, CziNotSupportedError
 import os
 from typing import TYPE_CHECKING
 
@@ -123,4 +124,44 @@ class FileOpsMixin:
             self.image_label.setText(f"Image: {self._short_path(self.model.path)}")
         if hasattr(self, "mask_label"):
             self.mask_label.setText(f"Mask: {self._short_path(self.model.mask_path)}")
+
+    # --------- additional file helpers ---------
+    def _import_czi_file(self: 'MainController') -> None:
+        """Import a CZI file and split it into OME-TIFF stacks."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import CZI", "", "CZI Files (*.czi)"
+        )
+        if not path:
+            return
+        out_dir = QFileDialog.getExistingDirectory(
+            self, "Select Output Folder", os.path.dirname(path)
+        )
+        if not out_dir:
+            return
+        try:
+            written = split_czi_file(path, out_dir)
+        except CziNotSupportedError as exc:
+            QMessageBox.warning(self, "CZI Support Missing", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "Import Complete",
+            f"Written {len(written)} stack(s) to {out_dir}",
+        )
+
+    def _show_stack_info(self: 'MainController') -> None:
+        """Display information about the currently loaded stack."""
+        if self.model.data is None:
+            return
+        shape = self.model.data.shape
+        pixels = self.model.get_pixel_sizes()
+        if pixels is None:
+            px_info = "unknown"
+        else:
+            px_info = f"{pixels[0]} x {pixels[1]} x {pixels[2]} µm"
+        msg = (
+            f"Dimensions: {shape}\n"
+            f"Pixel size: {px_info}"
+        )
+        QMessageBox.information(self, "Stack Info", msg)
 
