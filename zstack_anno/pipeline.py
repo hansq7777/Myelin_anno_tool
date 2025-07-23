@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import itertools
 from typing import Iterable, Callable
 
 import numpy as np
@@ -424,6 +425,59 @@ def run_strategy(
     else:
         precision, recall = compute_metrics(gt, pred)
     return pred, precision, recall
+
+
+def grid_search_strategy(
+    stack_path: str,
+    gt_path: str,
+    base_steps: Iterable[dict],
+    param_grid: dict[str, list],
+    *,
+    base_name: str = "strategy",
+    save_dir: str | None = None,
+    slice_idx: int | None = None,
+    step_callback: Callable[[np.ndarray, int, int], None] | None = None,
+) -> list[tuple[str, np.ndarray, float, float]]:
+    """Run ``run_strategy`` for all combinations in ``param_grid``.
+
+    New strategy JSON files are written to ``save_dir`` using ``base_name`` plus
+    the parameter values.
+    """
+
+    if save_dir is None:
+        save_dir = os.getcwd()
+
+    keys = list(param_grid.keys())
+    grids = [param_grid[k] for k in keys]
+    combos = list(itertools.product(*grids)) if keys else [()]
+    results = []
+    for values in combos:
+        steps = json.loads(json.dumps(list(base_steps)))
+        suffix_parts = []
+        for key, val in zip(keys, values):
+            if "." in key:
+                idx_str, param = key.split(".", 1)
+                idx = int(idx_str) - 1
+            else:
+                idx = 0
+                param = key
+            if idx < len(steps):
+                steps[idx].setdefault("params", {})[param] = val
+            suffix_parts.append(f"{param}{val}")
+        suffix = "_".join(suffix_parts) if suffix_parts else "default"
+        name = f"{base_name}_{suffix}"
+        script_path = os.path.join(save_dir, name + ".json")
+        with open(script_path, "w", encoding="utf-8") as f:
+            json.dump(steps, f, indent=2)
+        pred, prec, rec = run_strategy(
+            stack_path,
+            gt_path,
+            steps,
+            slice_idx=slice_idx,
+            step_callback=step_callback,
+        )
+        results.append((name, pred, prec, rec))
+    return results
 
 
 def main() -> None:

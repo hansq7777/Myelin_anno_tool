@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
     QSlider,
     QRadioButton,
     QButtonGroup,
+    QCheckBox,
     QSpinBox,
     QScrollArea,
     QWidget,
@@ -27,7 +28,13 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QTransform
 from PyQt5.QtCore import Qt
 
-from ..pipeline import run_strategy, overlay_mask, read_stack, StrategyRunner
+from ..pipeline import (
+    run_strategy,
+    overlay_mask,
+    read_stack,
+    StrategyRunner,
+    grid_search_strategy,
+)
 from ..views.canvas import SyncCanvas
 from ..models.zstack_model import ZStackModel
 
@@ -86,7 +93,30 @@ class ComparisonDialog(QDialog):
         btns.addWidget(rm_btn)
         btns.addStretch()
         strat_layout.addLayout(btns)
-        layout.addLayout(strat_layout)
+        self.strat_widget = QWidget()
+        self.strat_widget.setLayout(strat_layout)
+        layout.addWidget(self.strat_widget)
+
+        # grid search widgets
+        self.grid_mode = QCheckBox("Grid Search")
+        self.grid_mode.stateChanged.connect(self._toggle_mode)
+        layout.addWidget(self.grid_mode)
+
+        grid_layout = QHBoxLayout()
+        self.grid_strat_edit = QLineEdit()
+        grid_btn = QPushButton("Strategy…")
+        grid_btn.clicked.connect(self._choose_grid_strategy)
+        grid_layout.addWidget(QLabel("Strategy:"))
+        grid_layout.addWidget(self.grid_strat_edit)
+        grid_layout.addWidget(grid_btn)
+        grid_layout.addWidget(QLabel("Grid:"))
+        self.grid_param_edit = QLineEdit()
+        self.grid_param_edit.setPlaceholderText("1.value:10,20;2.iter:1,2")
+        grid_layout.addWidget(self.grid_param_edit)
+        self.grid_widget = QWidget()
+        self.grid_widget.setLayout(grid_layout)
+        layout.addWidget(self.grid_widget)
+        self.grid_widget.hide()
 
         # ---- Controls ----
         ctrl_layout = QHBoxLayout()
@@ -231,6 +261,38 @@ class ComparisonDialog(QDialog):
             # invalidate stored predictions for all stacks
             self._preds_by_stack = [None for _ in self._preds_by_stack]
 
+    def _choose_grid_strategy(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Select Strategy", "", "JSON (*.json)")
+        if path:
+            self.grid_strat_edit.setText(path)
+
+    def _toggle_mode(self) -> None:
+        grid = self.grid_mode.isChecked()
+        self.strat_widget.setVisible(not grid)
+        self.grid_widget.setVisible(grid)
+
+    def _parse_grid(self, text: str) -> dict[str, list]:
+        grid: dict[str, list] = {}
+        for part in text.split(";"):
+            part = part.strip()
+            if not part or ":" not in part:
+                continue
+            key, values = part.split(":", 1)
+            vals: list = []
+            for v in values.split(","):
+                v = v.strip()
+                if not v:
+                    continue
+                try:
+                    if "." in v:
+                        vals.append(float(v))
+                    else:
+                        vals.append(int(v))
+                except ValueError:
+                    vals.append(v)
+            grid[key.strip()] = vals
+        return grid
+
     def _load_preview(self) -> None:
         """Load current stack and ground truth for preview."""
         if not self.stacks:
@@ -257,63 +319,88 @@ class ComparisonDialog(QDialog):
         self._preds = []
         self._names.clear()
 
-        paths: list[str] = []
-        for i in range(self.strat_list.count()):
-            item = self.strat_list.item(i)
-            path = item.data(Qt.UserRole)
-            if path:
-                paths.append(path)
-                name = os.path.splitext(os.path.basename(path))[0]
-                self._names.append(name)
-
         slice_idx = self.slice_slider.value() if self.slice_radio.isChecked() else None
-        self._build_panels()
 
-        for si, path in enumerate(paths):
+        if self.grid_mode.isChecked():
+            path = self.grid_strat_edit.text()
+            if not path:
+                return
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    steps = json.load(f)
+                    base_steps = json.load(f)
             except Exception:
-                continue
+                return
+            grid = self._parse_grid(self.grid_param_edit.text())
+            results = grid_search_strategy(
+                stack_path,
+                gt_path,
+                base_steps,
+                grid,
+                base_name=os.path.splitext(os.path.basename(path))[0],
+                save_dir=os.path.dirname(path),
+                slice_idx=slice_idx,
+            )
+            for name, pred, _p, _r in results:
+                self._names.append(name)
+                self._preds.append(pred)
+            self._build_panels()
+        else:
+            paths: list[str] = []
+            for i in range(self.strat_list.count()):
+                item = self.strat_list.item(i)
+                path = item.data(Qt.UserRole)
+                if path:
+                    paths.append(path)
+                    name = os.path.splitext(os.path.basename(path))[0]
+                    self._names.append(name)
 
-            if gt_path:
-                pred, _, _ = run_strategy(
-                    stack_path,
-                    gt_path,
-                    steps,
-                    slice_idx=slice_idx,
-                    step_callback=lambda m, sidx, step_idx, s=si: self._live_update(s, m, sidx),
-                )
-            else:
-                model = ZStackModel()
-                model.load(stack_path)
-                model.ensure_masks()
-                runner = StrategyRunner(model)
+            self._build_panels()
 
-                indices = range(model.n_slices) if slice_idx is None else [slice_idx]
-                for idx in indices:
-                    model.index = idx
-                    def cb(mask, cur_idx, step_idx, s=si):
-                        self._live_update(s, mask, cur_idx)
-                    runner.run_steps(steps, callback=cb)
-                    model.index = min(model.index, model.n_slices - 1)
-                pred = model.masks.astype(np.uint8)
+            for si, path in enumerate(paths):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        steps = json.load(f)
+                except Exception:
+                    continue
 
-            self._preds.append(pred)
-
-            base = os.path.splitext(os.path.basename(stack_path))[0]
-            if slice_idx is None:
-                default = os.path.join(os.path.dirname(stack_path), f"{base}_{self._names[si]}.tif")
-            else:
-                default = os.path.join(
-                    os.path.dirname(stack_path), f"{base}_slice{slice_idx + 1}_{self._names[si]}.tif"
-                )
-            save_path, _ = QFileDialog.getSaveFileName(self, "Save Result", default, "TIFF Images (*.tif)")
-            if save_path:
-                if slice_idx is None:
-                    tifffile.imwrite(save_path, pred)
+                if gt_path:
+                    pred, _, _ = run_strategy(
+                        stack_path,
+                        gt_path,
+                        steps,
+                        slice_idx=slice_idx,
+                        step_callback=lambda m, sidx, step_idx, s=si: self._live_update(s, m, sidx),
+                    )
                 else:
-                    tifffile.imwrite(save_path, pred[slice_idx])
+                    model = ZStackModel()
+                    model.load(stack_path)
+                    model.ensure_masks()
+                    runner = StrategyRunner(model)
+
+                    indices = range(model.n_slices) if slice_idx is None else [slice_idx]
+                    for idx in indices:
+                        model.index = idx
+                        def cb(mask, cur_idx, step_idx, s=si):
+                            self._live_update(s, mask, cur_idx)
+                        runner.run_steps(steps, callback=cb)
+                        model.index = min(model.index, model.n_slices - 1)
+                    pred = model.masks.astype(np.uint8)
+
+                self._preds.append(pred)
+
+                base = os.path.splitext(os.path.basename(stack_path))[0]
+                if slice_idx is None:
+                    default = os.path.join(os.path.dirname(stack_path), f"{base}_{self._names[si]}.tif")
+                else:
+                    default = os.path.join(
+                        os.path.dirname(stack_path), f"{base}_slice{slice_idx + 1}_{self._names[si]}.tif"
+                    )
+                save_path, _ = QFileDialog.getSaveFileName(self, "Save Result", default, "TIFF Images (*.tif)")
+                if save_path:
+                    if slice_idx is None:
+                        tifffile.imwrite(save_path, pred)
+                    else:
+                        tifffile.imwrite(save_path, pred[slice_idx])
 
         # store predictions for this stack
         self._preds_by_stack[self.current_stack] = self._preds

@@ -17,7 +17,7 @@ if np_spec is None:
 if "tifffile" not in sys.modules:
     sys.modules["tifffile"] = types.ModuleType("tifffile")
 
-from zstack_anno.pipeline import run_strategy, read_stack
+from zstack_anno.pipeline import run_strategy, read_stack, grid_search_strategy
 
 
 def test_run_strategy_single_slice(tmp_path):
@@ -73,3 +73,34 @@ def test_read_stack_squeezes(tmp_path):
     result = read_stack(str(path))
 
     assert result.shape == (3, 2, 2)
+
+
+def test_grid_search_strategy(tmp_path):
+    stack = np.zeros((2, 2, 2), dtype=np.uint8)
+    gt = np.zeros_like(stack)
+    stack[0, 0, 0] = 100
+    gt[0, 0, 0] = 1
+
+    stack_path = tmp_path / "stack.tif"
+    gt_path = tmp_path / "gt.tif"
+    tifffile.imwrite(stack_path, stack)
+    tifffile.imwrite(gt_path, gt)
+
+    base_steps = [{"action": "Threshold Abs", "params": {"value": 50}}]
+    grid = {"1.value": [30, 50]}
+
+    results = grid_search_strategy(
+        str(stack_path),
+        str(gt_path),
+        base_steps,
+        grid,
+        base_name="thr",
+        save_dir=str(tmp_path),
+    )
+
+    assert len(results) == 2
+    names = [r[0] for r in results]
+    assert (tmp_path / "thr_value30.json").exists()
+    assert (tmp_path / "thr_value50.json").exists()
+    idx = names.index("thr_value50")
+    assert np.array_equal(results[idx][1], gt)
