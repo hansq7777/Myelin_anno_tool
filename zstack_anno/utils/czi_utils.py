@@ -65,18 +65,33 @@ def _parse_czi_metadata(metadata: str) -> Dict[str, object]:
         # fall back to Scene elements if present
         if not stage_positions:
             for idx, scene in enumerate(root.findall('.//Scene')):
-                x = float(scene.attrib.get('CenterX', '0'))
-                y = float(scene.attrib.get('CenterY', '0'))
-                stage_positions.append((x, y))
+                x: float | None = None
+                y: float | None = None
+                if 'CenterX' in scene.attrib and 'CenterY' in scene.attrib:
+                    x = float(scene.attrib.get('CenterX', '0'))
+                    y = float(scene.attrib.get('CenterY', '0'))
+                else:
+                    pos_elem = scene.find('.//Position')
+                    if pos_elem is not None:
+                        x = float(pos_elem.attrib.get('X', '0'))
+                        y = float(pos_elem.attrib.get('Y', '0'))
+                if x is not None and y is not None:
+                    stage_positions.append((x, y))
 
         # pixel size information
         scaling = root.find('.//Scaling')
         if scaling is not None:
             try:
-                px_x = float(scaling.attrib.get('X', '1'))
-                px_y = float(scaling.attrib.get('Y', '1'))
-                px_z = float(scaling.attrib.get('Z', '1'))
-                pixel_size = (px_x, px_y, px_z)
+                distances = {
+                    d.attrib.get('Id'): float(d.findtext('Value', '1'))
+                    for d in scaling.findall('.//Distance')
+                    if d.attrib.get('Id')
+                }
+                if distances:
+                    px_x = distances.get('X', 1.0)
+                    px_y = distances.get('Y', 1.0)
+                    px_z = distances.get('Z', 1.0)
+                    pixel_size = (px_x, px_y, px_z)
             except Exception:
                 pass
 
