@@ -5,7 +5,11 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox, QLabel
 import numpy as np
 from ..utils.dialogs import question_with_shortcuts
 from ..utils import config
-from ..utils.czi_utils import split_czi_file, CziNotSupportedError
+from ..utils.czi_utils import (
+    split_czi_file,
+    czi_to_tiff,
+    CziNotSupportedError,
+)
 import os
 from typing import TYPE_CHECKING
 
@@ -127,7 +131,7 @@ class FileOpsMixin:
 
     # --------- additional file helpers ---------
     def _import_czi_file(self: 'MainController') -> None:
-        """Import a CZI file and split it into OME-TIFF stacks."""
+        """Import a CZI file and convert it to OME-TIFF."""
         path, _ = QFileDialog.getOpenFileName(
             self, "Import CZI", "", "CZI Files (*.czi)"
         )
@@ -138,11 +142,31 @@ class FileOpsMixin:
         )
         if not out_dir:
             return
+
+        ret = QMessageBox.question(
+            self,
+            "Import CZI",
+            (
+                "Split stacks based on stage coordinates?\n"
+                "Choose No to keep all data in a single stack."
+            ),
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes,
+        )
+        if ret == QMessageBox.Cancel:
+            return
+
         try:
-            written = split_czi_file(path, out_dir)
+            if ret == QMessageBox.Yes:
+                written = split_czi_file(path, out_dir)
+            else:
+                name = os.path.splitext(os.path.basename(path))[0] + ".ome.tif"
+                out_path = os.path.join(out_dir, name)
+                written = [czi_to_tiff(path, out_path)]
         except CziNotSupportedError as exc:
             QMessageBox.warning(self, "CZI Support Missing", str(exc))
             return
+
         QMessageBox.information(
             self,
             "Import Complete",

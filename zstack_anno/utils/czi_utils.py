@@ -69,3 +69,37 @@ def split_czi_file(path: str, out_dir: str) -> List[str]:
         written.append(out_path)
 
     return written
+
+
+def czi_to_tiff(path: str, out_path: str) -> str:
+    """Save the entire CZI image as a single OME-TIFF stack.
+
+    Parameters
+    ----------
+    path:
+        Path to the ``.czi`` file.
+    out_path:
+        Output file path for the OME-TIFF stack.
+
+    Returns
+    -------
+    str
+        The written file path.
+    """
+    if czifile is None:
+        raise CziNotSupportedError(
+            "CZI support requires the 'czifile' package to be installed"
+        )
+
+    with czifile.CziFile(path) as czi:
+        metadata = czi.metadata()
+        arr = czi.asarray()
+
+    arr = np.squeeze(arr)
+    if arr.ndim > 3:
+        # collapse all leading dimensions except Y and X
+        leading = int(np.prod(arr.shape[:-2]))
+        arr = arr.reshape(leading, arr.shape[-2], arr.shape[-1])
+
+    tifffile.imwrite(out_path, arr, ome=metadata)
+    return out_path
