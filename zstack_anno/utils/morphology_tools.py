@@ -30,13 +30,28 @@ except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
     felzenszwalb = None  # type: ignore
 else:
     try:
-        from skimage.filters import gaussian, frangi, sato, meijering
+        from skimage.filters import (
+            gaussian,
+            frangi,
+            sato,
+            meijering,
+            hessian,
+            gabor,
+        )
     except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
         logger.warning("scikit-image.filters import failed: %s", exc)
         gaussian = None  # type: ignore
         frangi = None  # type: ignore
         sato = None  # type: ignore
         meijering = None  # type: ignore
+        hessian = None  # type: ignore
+        gabor = None  # type: ignore
+    try:
+        from skimage.feature import structure_tensor, structure_tensor_eigenvalues
+    except ImportError as exc:  # pragma: no cover - scikit-image may be unavailable
+        logger.warning("skimage.feature import failed: %s", exc)
+        structure_tensor = None  # type: ignore
+        structure_tensor_eigenvalues = None  # type: ignore
 
 skeletonize_3d = None
 
@@ -90,6 +105,26 @@ try:  # optional dependency
 except Exception as exc:  # pragma: no cover - optional dependency
     logger.warning("SimpleITK import failed: %s", exc)
     sitk = None  # type: ignore
+
+try:  # optional dependency
+    import cv2  # type: ignore
+    ximgproc = getattr(cv2, "ximgproc", None)
+except Exception as exc:  # pragma: no cover - optional dependency
+    logger.warning("cv2 import failed: %s", exc)
+    cv2 = None  # type: ignore
+    ximgproc = None  # type: ignore
+
+try:  # optional dependency
+    from ridge_detector import RidgeDetector
+except Exception as exc:  # pragma: no cover - optional dependency
+    logger.warning("ridge-detector import failed: %s", exc)
+    RidgeDetector = None  # type: ignore
+
+try:  # optional dependency
+    import itk  # type: ignore
+except Exception as exc:  # pragma: no cover - optional dependency
+    logger.warning("itk import failed: %s", exc)
+    itk = None  # type: ignore
 
 
 if nd_binary_dilation is None or sk_binary_dilation is None:
@@ -956,6 +991,129 @@ def meijering_filter_slice(
     if meijering is None:  # pragma: no cover - optional dependency
         return slice_.astype(float)
     return meijering(slice_.astype(float), sigmas=sigmas, black_ridges=black_ridges)
+
+
+def opencv_ridge_filter_slice(slice_: np.ndarray) -> np.ndarray:
+    """Detect ridges using OpenCV's RidgeDetectionFilter."""
+    if cv2 is None or ximgproc is None or not hasattr(ximgproc, "RidgeDetectionFilter_create"):
+        return slice_.astype(float)
+    filt = ximgproc.RidgeDetectionFilter_create()
+    return filt.getRidgeFilteredImage(slice_)
+
+
+def steger_ridge_filter_slice(slice_: np.ndarray, sigma: float = 1.0) -> np.ndarray:
+    """Detect ridges using the ridge-detector package."""
+    if RidgeDetector is None:  # pragma: no cover - optional dependency
+        return slice_.astype(float)
+    det = RidgeDetector(sigma=sigma)
+    return det.detect_ridges(slice_.astype(float))
+
+
+def chan_vese_slice(
+    image: np.ndarray,
+    iterations: int = 50,
+    smoothing: int = 1,
+    lambda1: float = 1.0,
+    lambda2: float = 1.0,
+    init_level_set: str | np.ndarray = "checkerboard",
+) -> np.ndarray:
+    """Segment image using morphological Chan-Vese."""
+    try:
+        from skimage.segmentation import morphological_chan_vese as mcv
+    except Exception as exc:  # pragma: no cover - optional dependency
+        logger.warning("chan_vese import failed: %s", exc)
+        return np.zeros_like(image, dtype=np.uint8)
+    result = mcv(
+        image.astype(float),
+        iterations,
+        init_level_set=init_level_set,
+        smoothing=smoothing,
+        lambda1=lambda1,
+        lambda2=lambda2,
+    )
+    return result.astype(np.uint8)
+
+
+def ced_filter_slice(
+    slice_: np.ndarray,
+    time_step: float = 0.125,
+    conductance: float = 3.0,
+    iterations: int = 5,
+) -> np.ndarray:
+    """Apply coherence enhancing diffusion using ITK."""
+    if itk is None or not hasattr(itk, "CoherenceEnhancingDiffusionImageFilter"):
+        return slice_.astype(float)
+    img = itk.image_view_from_array(slice_.astype(np.float32))
+    ced = itk.CoherenceEnhancingDiffusionImageFilter.New(Input=img)
+    ced.SetTimeStep(float(time_step))
+    ced.SetConductanceParameter(float(conductance))
+    ced.SetNumberOfIterations(int(iterations))
+    ced.Update()
+    return itk.array_from_image(ced.GetOutput())
+
+
+def tubetk_segment_tubes_slice(slice_: np.ndarray) -> np.ndarray:
+    """Segment tubes using TubeTK if available."""
+    if itk is None or not hasattr(itk, "tubetkSegmentTubes"):
+        return np.zeros_like(slice_, dtype=np.uint8)
+    img = itk.image_view_from_array(slice_.astype(np.float32))
+    res = itk.tubetkSegmentTubes(img)
+    return itk.array_from_image(res).astype(np.uint8)
+
+
+def tubetk_seeded_path_slice(slice_: np.ndarray, seeds: np.ndarray) -> np.ndarray:
+    """Grow paths from seeds using TubeTK."""
+    if itk is None or not hasattr(itk, "tubetkGeodesicPath"):
+        return np.zeros_like(slice_, dtype=np.uint8)
+    img = itk.image_view_from_array(slice_.astype(np.float32))
+    s = itk.image_view_from_array(seeds.astype(np.uint8))
+    res = itk.tubetkGeodesicPath(img, s)
+    return itk.array_from_image(res).astype(np.uint8)
+
+
+def hessian_filter_slice(
+    slice_: np.ndarray,
+    sigmas: tuple[int | float, ...] = (1, 2, 3),
+    *,
+    black_ridges: bool = True,
+) -> np.ndarray:
+    """Enhance line structures using the Hessian filter."""
+    if hessian is None:  # pragma: no cover - optional dependency
+        return slice_.astype(float)
+    return hessian(slice_.astype(float), sigmas=sigmas, black_ridges=black_ridges)
+
+
+def gabor_filter_slice(slice_: np.ndarray, frequency: float = 0.1, theta: float = 0.0) -> np.ndarray:
+    """Apply scikit-image Gabor filter."""
+    if gabor is None:  # pragma: no cover - optional dependency
+        return slice_.astype(float)
+    real, _ = gabor(slice_.astype(float), frequency=frequency, theta=theta)
+    return real
+
+
+def cv_gabor_filter_slice(
+    slice_: np.ndarray,
+    ksize: int = 21,
+    sigma: float = 5.0,
+    theta: float = 0.0,
+    lambd: float = 10.0,
+    gamma: float = 0.5,
+    psi: float = 0.0,
+) -> np.ndarray:
+    """Apply OpenCV Gabor kernel filtering."""
+    if cv2 is None:
+        return slice_.astype(float)
+    kernel = cv2.getGaborKernel((ksize, ksize), sigma, theta, lambd, gamma, psi)
+    return cv2.filter2D(slice_.astype(float), -1, kernel)
+
+
+def structure_tensor_eigen_slice(slice_: np.ndarray, sigma: float = 1.0) -> np.ndarray:
+    """Return largest eigenvalue of the structure tensor."""
+    if structure_tensor is None or structure_tensor_eigenvalues is None:  # pragma: no cover
+        return slice_.astype(float)
+    Axx, Axy, Ayy = structure_tensor(slice_.astype(float), sigma=sigma)
+    eigs = structure_tensor_eigenvalues((Axx, Axy, Ayy))
+    return eigs[0]
 
 
 def thin_slice(slice_: np.ndarray) -> np.ndarray:

@@ -223,6 +223,64 @@ class ScriptEditor(QDialog):
             "method": "script_fast_marching",
             "params": {"stopping_value": 10.0},
         },
+        "OpenCV Ridge": {
+            "method": "script_opencv_ridge",
+            "params": {"threshold": 0.5},
+        },
+        "Steger Ridge": {
+            "method": "script_steger_ridge",
+            "params": {"sigma": 1.0, "threshold": 0.5},
+        },
+        "Chan-Vese": {
+            "method": "script_chan_vese",
+            "params": {
+                "iterations": 50,
+                "smoothing": 1,
+                "lambda1": 1.0,
+                "lambda2": 1.0,
+            },
+        },
+        "CED Filter": {
+            "method": "script_ced_filter",
+            "params": {"iterations": 5},
+        },
+        "TubeTK Tubes": {
+            "method": "script_tubetk_segment",
+            "params": {},
+        },
+        "TubeTK Seed Path": {
+            "method": "script_tubetk_seed_path",
+            "params": {},
+        },
+        "Hessian Filter": {
+            "method": "script_hessian_filter",
+            "params": {
+                "sigma_start": 1.0,
+                "sigma_end": 3.0,
+                "sigma_step": 1.0,
+                "threshold": 0.5,
+                "black_ridges": True,
+            },
+        },
+        "Gabor Filter": {
+            "method": "script_gabor_filter",
+            "params": {"frequency": 0.1, "theta": 0.0},
+        },
+        "OpenCV Gabor": {
+            "method": "script_cv_gabor_filter",
+            "params": {
+                "ksize": 21,
+                "sigma": 5.0,
+                "theta": 0.0,
+                "lambd": 10.0,
+                "gamma": 0.5,
+                "psi": 0.0,
+            },
+        },
+        "Structure Tensor": {
+            "method": "script_structure_tensor",
+            "params": {"sigma": 1.0, "threshold": 0.5},
+        },
         "Shortest Path": {
             "method": "script_shortest_path",
             "params": {"y0": 0, "x0": 0, "y1": 10, "x1": 10},

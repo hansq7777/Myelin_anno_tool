@@ -301,6 +301,146 @@ class ScriptMixin:
         self.model.set_mask(mask)
         self._update_view()
 
+    def script_opencv_ridge(
+        self: "MainController", threshold: float = 0.5
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        response = morphology_tools.opencv_ridge_filter_slice(img)
+        mask = (response > threshold).astype(np.uint8)
+        self._push_undo("opencv_ridge")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_steger_ridge(
+        self: "MainController", sigma: float = 1.0, threshold: float = 0.5
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        response = morphology_tools.steger_ridge_filter_slice(img, sigma=sigma)
+        mask = (response > threshold).astype(np.uint8)
+        self._push_undo("steger_ridge")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_chan_vese(
+        self: "MainController",
+        iterations: int = 50,
+        smoothing: int = 1,
+        lambda1: float = 1.0,
+        lambda2: float = 1.0,
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        mask = morphology_tools.chan_vese_slice(
+            img,
+            iterations=iterations,
+            smoothing=smoothing,
+            lambda1=lambda1,
+            lambda2=lambda2,
+        )
+        self._push_undo("chan_vese")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_ced_filter(
+        self: "MainController", iterations: int = 5
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        result = morphology_tools.ced_filter_slice(img, iterations=iterations)
+        mask = (result > result.mean()).astype(np.uint8)
+        self._push_undo("ced_filter")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_tubetk_segment(self: "MainController") -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        mask = morphology_tools.tubetk_segment_tubes_slice(img)
+        self._push_undo("tubetk_segment")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_tubetk_seed_path(self: "MainController") -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        seeds = self.model.get_mask()
+        mask = morphology_tools.tubetk_seeded_path_slice(img, seeds)
+        self._push_undo("tubetk_seed_path")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_hessian_filter(
+        self: "MainController",
+        sigma_start: float = 1.0,
+        sigma_end: float = 3.0,
+        sigma_step: float = 1.0,
+        threshold: float = 0.5,
+        black_ridges: bool = True,
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        sigmas = np.arange(sigma_start, sigma_end + sigma_step, sigma_step)
+        resp = morphology_tools.hessian_filter_slice(
+            img, sigmas=sigmas, black_ridges=black_ridges
+        )
+        mask = (resp > threshold).astype(np.uint8)
+        self._push_undo("hessian")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_gabor_filter(
+        self: "MainController", frequency: float = 0.1, theta: float = 0.0
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        resp = morphology_tools.gabor_filter_slice(img, frequency=frequency, theta=theta)
+        mask = (resp > resp.mean()).astype(np.uint8)
+        self._push_undo("gabor")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_cv_gabor_filter(
+        self: "MainController",
+        ksize: int = 21,
+        sigma: float = 5.0,
+        theta: float = 0.0,
+        lambd: float = 10.0,
+        gamma: float = 0.5,
+        psi: float = 0.0,
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        resp = morphology_tools.cv_gabor_filter_slice(
+            img, ksize=ksize, sigma=sigma, theta=theta, lambd=lambd, gamma=gamma, psi=psi
+        )
+        mask = (resp > resp.mean()).astype(np.uint8)
+        self._push_undo("cv_gabor")
+        self.model.set_mask(mask)
+        self._update_view()
+
+    def script_structure_tensor(
+        self: "MainController", sigma: float = 1.0, threshold: float = 0.5
+    ) -> None:
+        if not self._ensure_masks():
+            return
+        img = self.model._extract_slice(self.model.index)
+        resp = morphology_tools.structure_tensor_eigen_slice(img, sigma=sigma)
+        mask = (resp > threshold).astype(np.uint8)
+        self._push_undo("structure_tensor")
+        self.model.set_mask(mask)
+        self._update_view()
+
     def script_stretch(self: "MainController", percentile: float = 0.0) -> None:
         if self.model.data is None:
             return

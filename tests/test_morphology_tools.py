@@ -29,6 +29,16 @@ from zstack_anno.utils.morphology_tools import (
     frangi_filter_slice,
     sato_filter_slice,
     meijering_filter_slice,
+    opencv_ridge_filter_slice,
+    steger_ridge_filter_slice,
+    chan_vese_slice,
+    ced_filter_slice,
+    tubetk_segment_tubes_slice,
+    tubetk_seeded_path_slice,
+    hessian_filter_slice,
+    gabor_filter_slice,
+    cv_gabor_filter_slice,
+    structure_tensor_eigen_slice,
     thin_slice,
     shortest_path_slice,
     felzenszwalb_slice,
@@ -422,3 +432,65 @@ def test_sitk_fast_marching_slice():
     dist = sitk_fast_marching_slice(img, seeds, stopping_value=5.0)
     assert dist.shape == img.shape
     assert dist[2, 2] == 0
+
+
+def test_opencv_ridge_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = opencv_ridge_filter_slice(img)
+    assert result.shape == img.shape
+
+
+def test_steger_ridge_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = steger_ridge_filter_slice(img, sigma=1.0)
+    assert result.shape == img.shape
+
+
+def test_chan_vese_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    img[2, 2] = 255
+    result = chan_vese_slice(img, iterations=1)
+    assert result.shape == img.shape
+
+
+def test_ced_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = ced_filter_slice(img, iterations=1)
+    assert result.shape == img.shape
+
+
+def test_tubetk_segment_tubes_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = tubetk_segment_tubes_slice(img)
+    assert result.shape == img.shape
+
+
+def test_tubetk_seeded_path_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    seeds = np.zeros_like(img, dtype=np.uint8)
+    result = tubetk_seeded_path_slice(img, seeds)
+    assert result.shape == img.shape
+
+
+def test_hessian_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = hessian_filter_slice(img, sigmas=(1,), black_ridges=True)
+    assert result.shape == img.shape
+
+
+def test_gabor_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = gabor_filter_slice(img, frequency=0.1, theta=0.0)
+    assert result.shape == img.shape
+
+
+def test_cv_gabor_filter_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = cv_gabor_filter_slice(img, ksize=5)
+    assert result.shape == img.shape
+
+
+def test_structure_tensor_eigen_slice():
+    img = np.zeros((5, 5), dtype=np.uint8)
+    result = structure_tensor_eigen_slice(img, sigma=1.0)
+    assert result.shape == img.shape
