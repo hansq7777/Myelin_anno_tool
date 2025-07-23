@@ -1,7 +1,7 @@
 import argparse
 import json
 import os
-from typing import Iterable
+from typing import Iterable, Callable
 
 import numpy as np
 import tifffile
@@ -284,9 +284,23 @@ class StrategyRunner:
         resp = morphology_tools.structure_tensor_eigen_slice(img, sigma=sigma)
         self.model.set_mask((resp > threshold).astype(np.uint8))
 
-    def run_steps(self, steps: Iterable[dict]) -> bool:
-        """Run ``steps`` once. Return ``False`` if aborted early."""
-        for step in steps:
+    def run_steps(
+        self,
+        steps: Iterable[dict],
+        *,
+        callback: Callable[[np.ndarray, int, int], None] | None = None,
+    ) -> bool:
+        """Run ``steps`` once and optionally invoke ``callback`` after each step.
+
+        Parameters
+        ----------
+        steps:
+            Iterable of step dictionaries as produced by the script editor.
+        callback:
+            Called with the current mask array, slice index and step index after
+            each step if provided.
+        """
+        for idx, step in enumerate(steps):
             action = step.get("action")
             if not action:
                 continue
@@ -298,6 +312,8 @@ class StrategyRunner:
                 continue
             params = step.get("params", {})
             result = method(**params)
+            if callback is not None:
+                callback(self.model.masks.astype(np.uint8), self.model.index, idx)
             if result is False:
                 self.next_slice()
                 return False
@@ -357,12 +373,24 @@ def overlay_image(
     return out.astype(np.uint8)
 
 
+def overlay_mask(img: np.ndarray, mask: np.ndarray, alpha: float = 0.5) -> np.ndarray:
+    """Return RGB overlay of ``mask`` on ``img`` without ground truth."""
+
+    base = ZStackModel._normalize_to_8bit(img).astype(float)
+    out = np.stack([base] * 3, axis=-1)
+    overlay = np.zeros_like(out)
+    overlay[mask > 0] = (0, 255, 0)
+    out[mask > 0] = (1 - alpha) * out[mask > 0] + alpha * overlay[mask > 0]
+    return out.astype(np.uint8)
+
+
 def run_strategy(
     path: str,
     gt_path: str,
     steps: Iterable[dict],
     *,
     slice_idx: int | None = None,
+    step_callback: Callable[[np.ndarray, int, int], None] | None = None,
 ) -> tuple[np.ndarray, float, float]:
     model = ZStackModel()
     model.load(path)
@@ -378,7 +406,12 @@ def run_strategy(
 
     for idx in indices:
         model.index = idx
-        runner.run_steps(steps)
+
+        def cb(mask: np.ndarray, cur_idx: int, step_idx: int) -> None:
+            if step_callback is not None:
+                step_callback(mask, cur_idx, step_idx)
+
+        runner.run_steps(steps, callback=cb)
         # ensure index stays within bounds
         model.index = min(model.index, model.n_slices - 1)
 
