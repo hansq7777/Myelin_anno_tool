@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Callable
 import tifffile
 import numpy as np
@@ -121,16 +122,30 @@ class ZStackModel:
         base = os.path.splitext(os.path.basename(self.path))[0] + "_mask.tif"
         return os.path.join(os.path.dirname(self.path), base)
 
-    def create_blank_masks(self, path: str | None = None) -> None:
+    def create_blank_masks(self, path: str | None = None, *, metadata: dict | None = None) -> None:
         if self.data is None:
             raise RuntimeError("Image must be loaded before creating masks")
         if path is None:
             path = self.default_mask_path()
         self.masks = np.zeros_like(self.data, dtype=np.uint8)
         self.mask_path = path
-        tifffile.imwrite(self.mask_path, self.masks)
+        desc = json.dumps(metadata) if metadata else None
+        tifffile.imwrite(self.mask_path, self.masks, description=desc)
         self.mask_dirty = False
         self.components = np.zeros_like(self.masks, dtype=np.int32)
+
+    def save_slice(self, slice_idx: int | None = None) -> None:
+        """Write ``slice_idx`` of the mask stack back to ``mask_path``."""
+        if self.masks is None:
+            raise RuntimeError("No masks to save")
+        if self.mask_path is None:
+            raise RuntimeError("No path specified for saving masks")
+        if slice_idx is None:
+            slice_idx = self.index
+        mm = tifffile.memmap(self.mask_path, mode="r+")
+        mm[slice_idx] = self.masks[slice_idx].astype(np.uint8)
+        mm.flush()
+        self.mask_dirty = False
 
     def ensure_masks(self) -> None:
         """Ensure that an in-memory mask stack exists without writing to disk."""
