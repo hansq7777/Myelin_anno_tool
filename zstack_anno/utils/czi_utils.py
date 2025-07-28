@@ -199,6 +199,35 @@ def czi_to_tiff(path: str, out_path: str) -> str:
     return out_path
 
 
+def dump_czi_metadata(path: str, out_path: str) -> str:
+    """Save the raw XML metadata from a CZI file.
+
+    Parameters
+    ----------
+    path:
+        Path to the ``.czi`` file.
+    out_path:
+        File path where the metadata XML will be written.
+
+    Returns
+    -------
+    str
+        The written file path.
+    """
+    if czifile is None:
+        raise CziNotSupportedError(
+            "CZI support requires the 'czifile' package to be installed"
+        )
+
+    with czifile.CziFile(path) as czi:
+        metadata = czi.metadata()
+
+    with open(out_path, "w", encoding="utf-8") as fh:
+        fh.write(metadata)
+
+    return out_path
+
+
 def extract_czi_metadata(path: str, out_path: str | None = None) -> Dict[str, object]:
     """Extract stage coordinates and pixel size from a CZI file.
 

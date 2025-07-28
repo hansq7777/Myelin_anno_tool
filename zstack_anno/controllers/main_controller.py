@@ -211,6 +211,9 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         import_czi_act = file_menu.addAction("Import CZI…")
         import_czi_act.triggered.connect(self._import_czi_file)
 
+        meta_act = file_menu.addAction("Export CZI Metadata…")
+        meta_act.triggered.connect(self._export_czi_metadata)
+
         new_mask_act = file_menu.addAction("New Mask Stack…")
         new_mask_act.triggered.connect(self._create_masks)
         new_mask_act.setShortcuts(["Ctrl+Shift+M", "Meta+Shift+M"])

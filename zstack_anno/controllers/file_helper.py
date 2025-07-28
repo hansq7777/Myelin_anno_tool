@@ -173,6 +173,36 @@ class FileOpsMixin:
             f"Written {len(written)} stack(s) to {out_dir}",
         )
 
+    def _export_czi_metadata(self: 'MainController') -> None:
+        """Save raw CZI metadata to a file."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select CZI", "", "CZI Files (*.czi)"
+        )
+        if not path:
+            return
+        default = os.path.splitext(os.path.basename(path))[0] + "_meta.xml"
+        out_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Metadata",
+            os.path.join(os.path.dirname(path), default),
+            "XML Files (*.xml)"
+        )
+        if not out_path:
+            return
+        try:
+            from ..utils.czi_utils import dump_czi_metadata
+
+            dump_czi_metadata(path, out_path)
+        except CziNotSupportedError as exc:
+            QMessageBox.warning(self, "CZI Support Missing", str(exc))
+            return
+
+        QMessageBox.information(
+            self,
+            "Metadata Saved",
+            f"Metadata written to {out_path}"
+        )
+
     def _show_stack_info(self: 'MainController') -> None:
         """Display information about the currently loaded stack."""
         if self.model.data is None:
