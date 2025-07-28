@@ -23,11 +23,17 @@ def test_parse_scene_positions_and_scaling():
                                         <Positions>
                                             <Position X="10.5" Y="20.5" Z="0.0" />
                                         </Positions>
+                                        <SubBlock>
+                                            <StageZPositionUm>1.5</StageZPositionUm>
+                                        </SubBlock>
                                     </Scene>
                                     <Scene Index="1">
                                         <Positions>
                                             <Position X="30.0" Y="40.0" Z="0.0" />
                                         </Positions>
+                                        <SubBlock>
+                                            <StageZPositionUm>2.5</StageZPositionUm>
+                                        </SubBlock>
                                     </Scene>
                                 </Scenes>
                             </S>
@@ -50,6 +56,7 @@ def test_parse_scene_positions_and_scaling():
     assert info['stage_positions'] == [(10.5, 20.5), (30.0, 40.0)]
     assert info['stack_count'] == 2
     assert info['pixel_size'] == (1.0, 2.0, 3.0)
+    assert info['stage_z_positions'] == [1.5, 2.5]
 
 
 def test_dump_czi_metadata(tmp_path, monkeypatch):
@@ -74,3 +81,30 @@ def test_dump_czi_metadata(tmp_path, monkeypatch):
     result = dump_czi_metadata("dummy.czi", str(out_path))
     assert result == str(out_path)
     assert out_path.read_text() == meta_xml
+
+
+def test_read_czi_stack(monkeypatch):
+    arr = __import__('numpy').zeros((1, 1, 3, 2, 2), dtype='uint8')
+    meta_xml = '<root/> '
+
+    class DummyCzi:
+        def __init__(self, path):
+            self.path = path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            pass
+
+        def metadata(self):
+            return meta_xml
+
+        def asarray(self):
+            return arr
+
+    monkeypatch.setattr(czi_utils, 'czifile', type('M', (), {'CziFile': DummyCzi}))
+
+    data, meta = czi_utils.read_czi_stack('dummy.czi')
+    assert data.shape == (3, 2, 2)
+    assert meta == meta_xml

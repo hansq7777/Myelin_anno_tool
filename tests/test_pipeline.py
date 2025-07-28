@@ -75,6 +75,18 @@ def test_read_stack_squeezes(tmp_path):
     assert result.shape == (3, 2, 2)
 
 
+def test_read_stack_czi(monkeypatch):
+    import numpy as np
+
+    def dummy(path):
+        return np.zeros((1, 1, 3, 2, 2), dtype=np.uint8), '<xml/>'
+
+    monkeypatch.setattr('zstack_anno.utils.czi_utils.read_czi_stack', dummy)
+
+    result = read_stack('image.czi')
+    assert result.shape == (3, 2, 2)
+
+
 def test_grid_search_strategy(tmp_path):
     stack = np.zeros((2, 2, 2), dtype=np.uint8)
     gt = np.zeros_like(stack)

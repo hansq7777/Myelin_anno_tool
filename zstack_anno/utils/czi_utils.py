@@ -1,7 +1,7 @@
 """Utilities for handling CZI files."""
 from __future__ import annotations
 
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Iterable
 import os
 import numpy as np
 import tifffile
@@ -28,6 +28,51 @@ def read_czi_metadata(path: str) -> Dict[str, object]:
 
     return _parse_czi_metadata(metadata)
 
+
+def read_czi_stack(path: str) -> tuple[np.ndarray, str]:
+    """Return image data and metadata from a CZI file without splitting."""
+    if czifile is None:
+        raise CziNotSupportedError(
+            "CZI support requires the 'czifile' package to be installed"
+        )
+
+    with czifile.CziFile(path) as czi:
+        metadata = czi.metadata()
+        arr = czi.asarray()
+
+    arr = np.squeeze(arr)
+    if arr.ndim == 4:
+        arr = arr[0]
+    if arr.ndim != 3:
+        raise ValueError("Only 3-D stacks are supported")
+
+    return arr, metadata
+
+
+def get_all_scene_bounding_boxes(metadata: str) -> List[Tuple[int, int, int, int]]:
+    """Return bounding boxes for all scenes found in CZI metadata."""
+    import xml.etree.ElementTree as ET
+
+    boxes: List[Tuple[int, int, int, int]] = []
+    try:
+        root = ET.fromstring(metadata)
+        for scene in root.findall('.//Scene'):
+            rect = scene.find('.//Bounds')
+            if rect is None:
+                rect = scene.find('.//BoundingBox')
+            if rect is not None:
+                try:
+                    x = int(rect.attrib.get('StartX', rect.attrib.get('X', '0')))
+                    y = int(rect.attrib.get('StartY', rect.attrib.get('Y', '0')))
+                    w = int(rect.attrib.get('SizeX', rect.attrib.get('Width', '0')))
+                    h = int(rect.attrib.get('SizeY', rect.attrib.get('Height', '0')))
+                    boxes.append((x, y, x + w, y + h))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return boxes
+
 def _parse_czi_metadata(metadata: str) -> Dict[str, object]:
     """Parse relevant information from CZI XML metadata.
 
@@ -45,6 +90,7 @@ def _parse_czi_metadata(metadata: str) -> Dict[str, object]:
     import xml.etree.ElementTree as ET
 
     stage_positions: List[Tuple[float, float]] = []
+    stage_z: List[float] = []
     pixel_size: Optional[Tuple[float, float, float]] = None
 
     try:
@@ -77,6 +123,15 @@ def _parse_czi_metadata(metadata: str) -> Dict[str, object]:
                         y = float(pos_elem.attrib.get('Y', '0'))
                 if x is not None and y is not None:
                     stage_positions.append((x, y))
+
+        # collect absolute Z positions if present
+        for sb in root.findall('.//SubBlock'):
+            text = sb.findtext('.//StageZPositionUm')
+            if text is not None:
+                try:
+                    stage_z.append(float(text))
+                except Exception:
+                    pass
 
         # pixel size information
         scaling = root.find('.//Scaling')
@@ -111,6 +166,7 @@ def _parse_czi_metadata(metadata: str) -> Dict[str, object]:
 
     return {
         'stage_positions': stage_positions,
+        'stage_z_positions': stage_z,
         'stack_count': len(stage_positions),
         'pixel_size': pixel_size,
     }

@@ -333,8 +333,16 @@ def compute_metrics(gt: np.ndarray, pred: np.ndarray) -> tuple[float, float]:
 
 
 def read_stack(path: str) -> np.ndarray:
-    """Load a stack from ``path`` and squeeze it to 3-D."""
-    arr = tifffile.imread(path)
+    """Load a stack from ``path`` (TIFF or CZI) and squeeze it to 3-D."""
+    if path.lower().endswith('.czi'):
+        from .utils.czi_utils import read_czi_stack, CziNotSupportedError
+
+        try:
+            arr, _ = read_czi_stack(path)
+        except CziNotSupportedError as exc:
+            raise RuntimeError(str(exc)) from exc
+    else:
+        arr = tifffile.imread(path)
     arr = np.squeeze(arr)
     if arr.ndim == 4:
         arr = arr[0]

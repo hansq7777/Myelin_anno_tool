@@ -38,10 +38,18 @@ class ZStackModel:
         self._segment_mask: np.ndarray | None = None
 
     def load(self, path: str) -> None:
-        """Load a TIFF stack and reset masks."""
-        with tifffile.TiffFile(path) as tif:
-            arr = tif.asarray()
-            self.ome_metadata = tif.ome_metadata
+        """Load a stack from TIFF or CZI and reset masks."""
+        if path.lower().endswith('.czi'):
+            from ..utils.czi_utils import read_czi_stack, CziNotSupportedError
+
+            try:
+                arr, self.ome_metadata = read_czi_stack(path)
+            except CziNotSupportedError as exc:
+                raise RuntimeError(str(exc)) from exc
+        else:
+            with tifffile.TiffFile(path) as tif:
+                arr = tif.asarray()
+                self.ome_metadata = tif.ome_metadata
         print("Loaded shape:", arr.shape, "dtype:", arr.dtype)
 
         # Remove single-length axes (e.g. t=1, c=1)

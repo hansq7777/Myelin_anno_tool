@@ -15,7 +15,9 @@ After installation, run the application with:
 python -m zstack_anno
 ```
 
-This will launch the annotation window defined in `zstack_anno`.
+This will launch the annotation window defined in `zstack_anno`.  The
+**Open** action accepts both TIFF and CZI files so you can view raw microscope
+data without converting first.
 
 Installing both `scipy` and `scikit-image` enables faster morphology
 operations. If either package is missing, slower NumPy fallbacks will be used

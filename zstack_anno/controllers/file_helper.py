@@ -24,7 +24,10 @@ class FileOpsMixin:
         if not self._prompt_save_if_dirty():
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open TIFF", "", "TIFF Images (*.tif *.tiff *.ome.tif)"
+            self,
+            "Open Image",
+            "",
+            "Images (*.tif *.tiff *.ome.tif *.czi)",
         )
         if path:
             self.model.load(path)
