@@ -67,6 +67,30 @@ stacks captured (`stack_count`) and the stage coordinates for each stack.
 You can also choose **File → Export CZI Metadata…** in the GUI to save the raw
 XML metadata for manual inspection.
 
+### Writing and reading OME-TIFF metadata
+
+Image stacks can be saved as OME-TIFF while preserving all metadata. The
+`tifffile` library writes the provided XML directly into the file. After saving
+you can recover and inspect the metadata using
+`parse_zeiss_ome_metadata` from `zstack_anno.utils.ome_utils`:
+
+```python
+from tifffile import imwrite, TiffFile
+from zstack_anno.utils.ome_utils import parse_zeiss_ome_metadata
+
+# ``xml`` contains the metadata string extracted from a CZI file
+imwrite("stack.ome.tif", data, ome=xml)
+
+with TiffFile("stack.ome.tif") as tif:
+    ome_xml = tif.ome_metadata
+info = parse_zeiss_ome_metadata(ome_xml)
+print(info["document"])  # access name, user and creation date
+```
+
+The **Stack Info** menu item uses this parser to display details such as file
+and user information, image dimensions and pixel scaling, channel names,
+instrument models and acquisition settings.
+
 ### Shortcuts
 
 - `P` – toggle brush painting
