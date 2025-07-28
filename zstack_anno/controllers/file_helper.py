@@ -208,14 +208,20 @@ class FileOpsMixin:
         if self.model.data is None:
             return
         shape = self.model.data.shape
-        pixels = self.model.get_pixel_sizes()
-        if pixels is None:
-            px_info = "unknown"
+        lines = [f"Dimensions: {shape}"]
+        if self.model.ome_metadata:
+            from ..utils.ome_utils import parse_zeiss_ome_metadata, format_metadata
+
+            info = parse_zeiss_ome_metadata(self.model.ome_metadata)
+            summary = format_metadata(info)
+            if summary:
+                lines.append(summary)
         else:
-            px_info = f"{pixels[0]} x {pixels[1]} x {pixels[2]} µm"
-        msg = (
-            f"Dimensions: {shape}\n"
-            f"Pixel size: {px_info}"
-        )
-        QMessageBox.information(self, "Stack Info", msg)
+            pixels = self.model.get_pixel_sizes()
+            if pixels is None:
+                px_info = "unknown"
+            else:
+                px_info = f"{pixels[0]} x {pixels[1]} x {pixels[2]} µm"
+            lines.append(f"Pixel size: {px_info}")
+        QMessageBox.information(self, "Stack Info", "\n".join(lines))
 
