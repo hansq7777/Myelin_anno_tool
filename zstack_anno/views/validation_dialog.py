@@ -67,6 +67,10 @@ class ValidationDialog(QDialog):
         self._names: List[str] = []
         self._metas: List[Optional[dict]] = []
         self._metrics: List[Optional[tuple[float, float]]] = []
+        # canvases are populated once masks/ground truth are loaded
+        # but _update_images may run before that happens, so initialize
+        # the attribute here to avoid AttributeError
+        self.canvases: List[MetaCanvas] = []
 
         layout = QVBoxLayout(self)
 
