@@ -251,6 +251,10 @@ class ValidationDialog(QDialog):
                 self._metrics.append(compute_metrics(self._gt, arr))
             else:
                 self._metrics.append(None)
+        # match number of displayed windows to loaded masks
+        self.window_spin.blockSignals(True)
+        self.window_spin.setValue(max(len(self._masks), 1))
+        self.window_spin.blockSignals(False)
         self._build_panels()
         self.legend_widget.setVisible(self._gt is not None and len(self._masks) > 1)
 
@@ -298,7 +302,8 @@ class ValidationDialog(QDialog):
         for i, canvas in enumerate(self.canvases):
             if i < len(self._masks):
                 if i == 0 or self._gt is None:
-                    overlay = overlay_mask(img, self._masks[i][idx], alpha=0.4)
+                    # slightly transparent GT overlay to inspect underlying image
+                    overlay = overlay_mask(img, self._masks[i][idx], alpha=0.3)
                 else:
                     overlay = overlay_image(img, self._gt[idx], self._masks[i][idx], alpha=0.4)
                 canvas.set_image(overlay)
