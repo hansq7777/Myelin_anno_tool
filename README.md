@@ -34,6 +34,10 @@ the original image so changing strength values will not compound effects.
 Undo and redo are found under
 **Edit**.
 
+The **File** menu also includes an option to export the raw metadata from a CZI
+image. This writes the XML metadata to disk so you can inspect stage
+coordinates and other acquisition details.
+
 ### Script Editor
 
 The **Tools** menu opens a Script Editor for building simple automation
@@ -60,6 +64,8 @@ python -m zstack_anno.utils.czi_utils myfile.czi -o meta.json
 
 The generated JSON lists the physical resolution (`pixel_size`), the number of
 stacks captured (`stack_count`) and the stage coordinates for each stack.
+You can also choose **File → Export CZI Metadata…** in the GUI to save the raw
+XML metadata for manual inspection.
 
 ### Shortcuts
 
