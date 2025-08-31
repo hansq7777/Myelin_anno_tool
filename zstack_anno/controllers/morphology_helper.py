@@ -205,9 +205,16 @@ class MorphologyMixin:
         self.model.toggle_show_original()
         self._update_view()
 
-    def _change_opacity(self: "MainController") -> None:
-        value = self.opacity_slider.value() if hasattr(self, "opacity_slider") else 50
-        self.canvas.set_mask_opacity(value / 100.0)
+    def _change_mask_visibility(self: "MainController") -> None:
+        """Update mask opacity based on the visibility slider.
+
+        Raises:
+            AttributeError: If the visibility slider is missing.
+        """
+        slider = getattr(self, "mask_vis_slider", None)
+        if slider is None:
+            raise AttributeError("mask_vis_slider not initialized")
+        self.canvas.set_mask_opacity(slider.value() / 100.0)
         mask = self.model.get_mask() if self.model.masks is not None else None
         self.canvas.set_mask(mask)
 
