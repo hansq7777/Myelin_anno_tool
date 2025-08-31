@@ -117,6 +117,13 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         mask_layout.addWidget(self.skeleton_btn)
         mask_layout.addWidget(self.filter_btn)
         mask_layout.addWidget(self.filter_spin)
+        self.mask_vis_label = QLabel("Mask Visibility")
+        self.mask_vis_slider = QSlider(Qt.Horizontal)
+        self.mask_vis_slider.setRange(0, 100)
+        self.mask_vis_slider.setValue(50)
+        self.mask_vis_slider.valueChanged.connect(self._change_mask_visibility)
+        mask_layout.addWidget(self.mask_vis_label)
+        mask_layout.addWidget(self.mask_vis_slider)
         ctrl.addLayout(mask_layout)
 
         # ---- Thresholding ----
@@ -186,12 +193,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         disp_layout = QVBoxLayout()
         self.show_orig_chk = QCheckBox("Show Original")
         self.show_orig_chk.toggled.connect(self._toggle_original)
-        self.opacity_slider = QSlider(Qt.Horizontal)
-        self.opacity_slider.setRange(0, 100)
-        self.opacity_slider.setValue(50)
-        self.opacity_slider.valueChanged.connect(self._change_opacity)
         disp_layout.addWidget(self.show_orig_chk)
-        disp_layout.addWidget(self.opacity_slider)
         ctrl.addLayout(disp_layout)
 
         self.info_label = QLabel("")

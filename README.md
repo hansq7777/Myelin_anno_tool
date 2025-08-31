@@ -28,7 +28,8 @@ and a warning will be issued at runtime.
 Main operations are available both as toolbar buttons and in the menu bar.
 The **Mask** menu contains dilation, erosion, size filtering, background removal,
 and seeding. Seeding places random seed pixels above an intensity percentile,
-sampling a percentage of the image size.
+sampling a percentage of the image size. A Mask Visibility slider in the mask
+panel adjusts segmentation mask opacity from 0 (hidden) to 100 (solid color).
 The **Image** menu provides histogram stretch
 (0% resets to the original image), Gaussian blur with a toggle to show the
 unprocessed original, and an option to clear the blur.  Each adjustment is reapplied to
