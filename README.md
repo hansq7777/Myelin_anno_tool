@@ -41,6 +41,21 @@ The **File** menu also includes an option to export the raw metadata from a CZI
 image. This writes the XML metadata to disk so you can inspect stage
 coordinates and other acquisition details.
 
+### Linear menu (advanced filters)
+
+The **Linear** menu exposes raw-image and seed-mask operations geared toward
+line-like structures:
+
+- Raw Image: Frangi, Sato, Meijering, Hessian, Gabor (scikit-image), OpenCV
+  Gabor, Structure Tensor, Felzenszwalb, OpenCV Ridge, Steger Ridge, Chan-Vese,
+  CED Filter, TubeTK Tubes.
+- Seed Mask: Watershed IFT, scikit-fmm, Fast Marching, TubeTK Seed Path.
+- Thin Skeleton: one-click thinning for existing masks.
+
+Some of these actions rely on optional dependencies (OpenCV/ximgproc,
+ridge-detector, SimpleITK, ITK/TubeTK, scikit-fmm). If a dependency is missing,
+the action will fall back to a no-op or zero mask and log a warning.
+
 ### Script Editor
 
 The **Tools** menu opens a Script Editor for building simple automation
@@ -48,6 +63,28 @@ workflows. The editor appears in its own window so you can keep interacting
 with the main interface while it is open. Drag actions from the list on the
 right into the sequence on the left, adjust their parameters, then run, pause or
 stop the script. Sequences can be saved to or loaded from JSON files.
+Script actions include the Linear menu filters plus utilities like shortest
+path tracing.
+
+### Strategy Comparison and Validation Viewer
+
+The **Tools** menu also includes:
+
+- **Strategy Comparison**: run multiple script JSON strategies on a stack (with
+  optional grid search) and compare overlays/metrics across slices.
+- **Validation Viewer**: view predicted masks vs ground truth with TP/FP/FN
+  overlays and whole-stack statistics.
+
+### CLI pipeline (batch evaluation)
+
+To evaluate one or more strategy JSON files against a stack and ground truth:
+
+```bash
+python -m zstack_anno.pipeline --stack stack.tif --groundtruth gt.tif --strategies a.json b.json --output pipeline_results
+```
+
+The command writes per-slice overlay images and prints precision/recall to
+stdout.
 
 ## Running the tests
 
