@@ -5,3 +5,9 @@ results/
 
 # 忽略所有 .tar.gz 压缩包
 *.tar.gz
+
+# Local tool bundles (documented in TOOL_REQUIREMENTS.md)
+bftools/
+jdk-*-jre/
+jre
+test/
