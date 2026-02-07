@@ -15,6 +15,7 @@
 说明：
 - 程序会从表格中读取 `raw_path/raw_found_path` 与 `inference_found_path`。
 - 只会加载“原图与预测路径都存在”的条目；缺失条目会跳过。
+- 打开后默认切换到 `Unreviewed`，并自动加载第一条未审核样本开始工作（若无未审核则回退到 `All`）。
 
 ## 2. 界面布局与按钮功能
 
@@ -34,6 +35,8 @@
 - `Grade`：当前样本类别（可直接切换）
 - `Mark A` / `Mark B` / `Mark C`：一键打标并自动进入下一组
 - `Save Corrected Mask`：保存你手动微调后的掩膜
+- `Quick Auto Script`：对当前 slice 一键执行默认自动策略  
+  `Seed -> Dilate -> Background Filter -> Intensity Grow -> Background Filter`
 - 右侧状态条：显示当前位置、当前样本 ID、A/B/C/U 数量统计
 
 ### 2.3 画布与叠加显示
@@ -63,8 +66,66 @@
 - `Alt+1`：标记 A
 - `Alt+2`：标记 B
 - `Alt+3`：标记 C
+- `Alt+Q`：运行 `Quick Auto Script`
 
-## 5. Excel 自动记录字段
+## 5. 快捷键总表（UI 实际可用）
+
+| 快捷键 | 功能 |
+| --- | --- |
+| `↑/←` | 上一张 slice |
+| `↓/→` | 下一张 slice |
+| `Alt+,` | 上一组 review stack |
+| `Alt+.` | 下一组 review stack |
+| `Alt+1` | 当前 stack 标记为 A |
+| `Alt+2` | 当前 stack 标记为 B |
+| `Alt+3` | 当前 stack 标记为 C |
+| `Alt+Q` | 运行单张 `Quick Auto Script` |
+| `Alt+W` | 运行 `Quick Auto Stack`（全栈/范围/关键切片） |
+| `Alt+Shift+Q` | 回退到最近一次自动策略运行前快照 |
+| `Alt+S` / `Ctrl+S` / `Meta+S` | Quick Save 掩膜 |
+| `Alt+D` / `Meta+D` | 清除当前 slice 前景 |
+| `D` | 膨胀当前掩膜 |
+| `E` | 腐蚀当前掩膜 |
+| `Z` | Undo |
+| `X` | Redo |
+| `P` | 画笔模式开关 |
+| `[` / `]` | 缩小/增大画笔 |
+| `H` | 切换手型拖拽 |
+
+说明：
+- `Meta` 对应 macOS 的 `Command` 键。
+- 右键拖拽可删除触碰到拖拽框的连通域（无键盘快捷键）。
+
+## 6. 自动策略进阶用法（新）
+
+### 6.1 参数预设下拉
+
+`Auto Preset` 提供 3 档：
+
+- `Conservative`：保守，过分割风险低，漏检可能更高。
+- `Balanced`：平衡，默认建议。
+- `Aggressive`：激进，连通更充分，但过分割风险更高。
+
+### 6.2 执行后质量门控（Quality Gate）
+
+每次运行自动策略后会检查前景像素增幅是否异常。若超过阈值，会弹窗提示是否回退。
+
+- 支持一键回退到自动策略执行前快照，不受“单动作 Undo”限制。
+- 也可手动点 `Revert Auto Snapshot` 进行回退。
+
+### 6.3 一键跑当前 stack（全栈/范围/关键切片）
+
+点 `Quick Auto Stack` 后可选择：
+
+- `All slices`：全栈执行
+- `Slice range...`：输入起止范围
+- `Key slices (first/middle/last)`：首/中/尾关键切片
+
+执行结束后会停在最后处理的 slice，便于立即人工审核。
+
+若批量执行中有切片触发质量门控，会给出汇总并可选择是否整体回退到运行前快照。
+
+## 7. Excel 自动记录字段
 
 程序会自动创建或更新以下列：
 
@@ -79,7 +140,7 @@
 - `review_corrected_mask_path`：修正掩膜路径
 - `review_corrected_saved_at`：修正掩膜保存时间
 
-## 6. 修正掩膜保存位置
+## 8. 修正掩膜保存位置
 
 点击 `Save Corrected Mask` 后，文件写入：
 
@@ -91,7 +152,7 @@
 
 如果该文件已存在，会弹窗确认是否覆盖。
 
-## 7. 常见问题
+## 9. 常见问题
 
 1. 打不开 tracker  
    先确认已安装 `openpyxl`（`requirements.txt` 已包含）。

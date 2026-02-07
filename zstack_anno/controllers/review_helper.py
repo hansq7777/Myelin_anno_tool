@@ -29,6 +29,9 @@ class ReviewMixin:
         self._review_current_item_index: int = -1
         self._review_current_filtered_pos: int = -1
         self._review_grade_updating: bool = False
+        self._review_filter_updating: bool = False
+        self._review_skipped_missing_paths: int = 0
+        self._review_skipped_missing_files: int = 0
 
     # --------- public actions ---------
     def _open_review_tracker(self: "MainController") -> None:
@@ -68,6 +71,8 @@ class ReviewMixin:
         self._review_set_grade(grade, move_next=False)
 
     def _review_on_filter_changed(self: "MainController", _text: str) -> None:
+        if self._review_filter_updating:
+            return
         self._review_rebuild_filtered_indices(load_item=True)
 
     def _review_save_corrected_mask(self: "MainController") -> None:
@@ -141,8 +146,39 @@ class ReviewMixin:
         self._review_ensure_columns()
         self._review_refresh_items()
         self._set_review_controls_enabled(bool(self._review_items))
+        if not self._review_items:
+            self._review_rebuild_filtered_indices(load_item=False)
+            QMessageBox.information(
+                self,
+                "Review Tracker",
+                (
+                    "Tracker loaded, but 0 usable raw+prediction pairs were found.\n\n"
+                    "Please check that path columns are populated and files exist.\n"
+                    "Supported raw columns: raw_path, raw_found_path\n"
+                    "Supported prediction columns: inference_found_path, inference_path, prediction_path, pred_path, mask_path"
+                ),
+            )
+            self.statusBar().showMessage(
+                (
+                    "Review tracker loaded with 0 usable items "
+                    f"(missing paths: {self._review_skipped_missing_paths}, "
+                    f"missing files: {self._review_skipped_missing_files})."
+                )
+            )
+            return
+
+        default_filter = self._review_pick_initial_filter()
+        self._review_set_filter(default_filter)
         self._review_rebuild_filtered_indices(load_item=True)
-        self.statusBar().showMessage(f"Review tracker loaded: {os.path.basename(path)}")
+        self.statusBar().showMessage(
+            (
+                f"Review tracker loaded: {os.path.basename(path)} | "
+                f"usable: {len(self._review_items)} | "
+                f"missing paths: {self._review_skipped_missing_paths} | "
+                f"missing files: {self._review_skipped_missing_files} | "
+                f"start filter: {default_filter}"
+            )
+        )
 
     def _review_refresh_items(self: "MainController") -> None:
         if self._review_ws is None:
@@ -150,25 +186,35 @@ class ReviewMixin:
             return
         ws = self._review_ws
         items: list[dict] = []
-        skipped = 0
+        skipped_missing_paths = 0
+        skipped_missing_files = 0
 
         for row in range(2, ws.max_row + 1):
             zstack_id = self._review_cell(row, "zstack_id")
             if not zstack_id:
                 continue
-            raw_path = (
-                self._review_cell(row, "raw_path")
-                or self._review_cell(row, "raw_found_path")
+            raw_path = self._review_first_nonempty(
+                row,
+                ["raw_path", "raw_found_path"],
             )
-            pred_path = self._review_cell(row, "inference_found_path")
+            pred_path = self._review_first_nonempty(
+                row,
+                [
+                    "inference_found_path",
+                    "inference_path",
+                    "prediction_path",
+                    "pred_path",
+                    "mask_path",
+                ],
+            )
 
             raw_local = windows_to_local_path(raw_path) if raw_path else ""
             pred_local = windows_to_local_path(pred_path) if pred_path else ""
             if not raw_local or not pred_local:
-                skipped += 1
+                skipped_missing_paths += 1
                 continue
             if not os.path.exists(raw_local) or not os.path.exists(pred_local):
-                skipped += 1
+                skipped_missing_files += 1
                 continue
 
             grade = normalize_review_grade(self._review_cell(row, "review_grade"))
@@ -186,10 +232,8 @@ class ReviewMixin:
             )
 
         self._review_items = items
-        if skipped > 0:
-            self.statusBar().showMessage(
-                f"Review tracker loaded with {len(items)} items ({skipped} rows skipped due to missing paths/files)."
-            )
+        self._review_skipped_missing_paths = skipped_missing_paths
+        self._review_skipped_missing_files = skipped_missing_files
 
     def _review_ensure_columns(self: "MainController") -> None:
         if self._review_ws is None:
@@ -383,6 +427,20 @@ class ReviewMixin:
             )
         )
 
+    def _review_pick_initial_filter(self: "MainController") -> str:
+        has_unreviewed = any(
+            not normalize_review_grade(item.get("grade"))
+            for item in self._review_items
+        )
+        return "Unreviewed" if has_unreviewed else "All"
+
+    def _review_set_filter(self: "MainController", value: str) -> None:
+        if not hasattr(self, "review_filter_combo"):
+            return
+        self._review_filter_updating = True
+        self.review_filter_combo.setCurrentText(value)
+        self._review_filter_updating = False
+
     # --------- workbook helpers ---------
     def _review_cell(self: "MainController", row: int, column_name: str) -> str:
         col = self._review_headers.get(column_name)
@@ -398,6 +456,13 @@ class ReviewMixin:
         if not col or self._review_ws is None:
             return
         self._review_ws.cell(row, col).value = value
+
+    def _review_first_nonempty(self: "MainController", row: int, columns: list[str]) -> str:
+        for name in columns:
+            value = self._review_cell(row, name)
+            if value:
+                return value
+        return ""
 
     def _review_default_corrected_path(self: "MainController", item: dict) -> str:
         tracker_dir = os.path.dirname(self._review_tracker_path or "")

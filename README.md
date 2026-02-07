@@ -85,6 +85,8 @@ for finetuning:
 
 - Open **Review -> Open Tracker...** and choose your tracker `.xlsx`.
 - The current stack loads with prediction overlay (raw image + red mask).
+- On load, the app defaults to **Unreviewed** and opens the first unreviewed
+  zstack automatically (falls back to **All** if none are unreviewed).
 - Use **Prev Stack/Next Stack** (or `Alt+,` / `Alt+.`) to move between zstacks.
 - Mark quality in one click:
   - `A` = usable as-is
@@ -95,10 +97,41 @@ for finetuning:
   subset.
 - Use **Save Corrected Mask** to write edited masks into
   `review_corrected_masks/<GRADE>/...` and store the path back into the tracker.
+- Use **Quick Auto Script** (or `Alt+Q`) to run the default one-click pipeline
+  on the current slice:
+  `Seed -> Dilate -> Background Filter -> Intensity Grow -> Background Filter`.
+- Use **Auto Preset** to switch quick-auto parameters:
+  `Conservative / Balanced / Aggressive`.
+- Use **Quick Auto Stack** (or `Alt+W`) to run the quick-auto strategy on:
+  all slices, a slice range, or key slices (first/middle/last). The viewer
+  stops at the last processed slice for manual review.
+- A post-run quality gate checks abnormal foreground growth; if triggered, you
+  can revert in one click to the pre-run snapshot using the popup or
+  **Revert Auto Snapshot** (`Alt+Shift+Q`).
 
 Tracker columns are auto-created if missing:
 `review_grade`, `review_status`, `review_note`, `review_updated_at`,
 `review_corrected_mask_path`, `review_corrected_saved_at`.
+
+### Shortcut Reference
+
+| Shortcut | Action |
+| --- | --- |
+| `Up/Left` | Previous slice |
+| `Down/Right` | Next slice |
+| `Alt+,` | Previous review stack |
+| `Alt+.` | Next review stack |
+| `Alt+1 / Alt+2 / Alt+3` | Mark current stack as A/B/C |
+| `Alt+Q` | Run quick auto on current slice |
+| `Alt+W` | Run quick auto on stack/range |
+| `Alt+Shift+Q` | Revert to pre-auto snapshot |
+| `Alt+S` / `Ctrl+S` / `Meta+S` | Quick save masks |
+| `Alt+D` / `Meta+D` | Clear foreground on current slice |
+| `D` / `E` | Dilate / Erode |
+| `Z` / `X` | Undo / Redo |
+| `P` | Toggle brush mode |
+| `[` / `]` | Brush size down/up |
+| `H` | Hand tool (panning) |
 
 ### CLI pipeline (batch evaluation)
 

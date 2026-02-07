@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 
 def normalize_review_grade(value: object) -> str:
     """Return normalized review grade: '', 'A', 'B' or 'C'."""
@@ -12,10 +13,20 @@ def normalize_review_grade(value: object) -> str:
 
 
 def windows_to_local_path(path: str) -> str:
-    """Convert Windows path (e.g. ``D:\\foo\\bar``) to ``/mnt/d/foo/bar``."""
+    """Normalize tracker path for current OS.
+
+    - On POSIX/WSL: convert ``D:\\foo\\bar`` -> ``/mnt/d/foo/bar``
+    - On Windows: keep drive paths as-is; convert ``/mnt/d/foo/bar`` -> ``D:\\foo\\bar``
+    """
     text = (path or "").strip().strip('"')
     if not text:
         return ""
+    if os.name == "nt":
+        if text.startswith("/mnt/") and len(text) > 7 and text[6] == "/":
+            drive = text[5].upper()
+            tail = text[7:].replace("/", "\\")
+            return f"{drive}:\\{tail}"
+        return text.replace("/", "\\")
     if text.startswith("/mnt/"):
         return text
     # Drive path, e.g. C:\data\file.tif
@@ -27,7 +38,7 @@ def windows_to_local_path(path: str) -> str:
 
 
 def local_to_windows_path(path: str) -> str:
-    """Convert ``/mnt/<drive>/...`` into Windows style path."""
+    """Convert path to Windows style path for tracker persistence."""
     text = (path or "").strip()
     if not text:
         return ""
@@ -35,6 +46,8 @@ def local_to_windows_path(path: str) -> str:
         drive = text[5].upper()
         tail = text[7:].replace("/", "\\")
         return f"{drive}:\\{tail}"
+    if os.name == "nt":
+        return text.replace("/", "\\")
     return text
 
 
