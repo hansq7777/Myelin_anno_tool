@@ -19,6 +19,9 @@ This will launch the annotation window defined in `zstack_anno`.  The
 **Open** action accepts both TIFF and CZI files so you can view raw microscope
 data without converting first.
 
+Chinese guide for the review workflow:
+`REVIEW_QUICK_AUDIT_GUIDE_zh.md`
+
 Installing both `scipy` and `scikit-image` enables faster morphology
 operations. If either package is missing, slower NumPy fallbacks will be used
 and a warning will be issued at runtime.
@@ -74,6 +77,28 @@ The **Tools** menu also includes:
   optional grid search) and compare overlays/metrics across slices.
 - **Validation Viewer**: view predicted masks vs ground truth with TP/FP/FN
   overlays and whole-stack statistics.
+
+### Review workflow (raw + prediction QC)
+
+The app now supports a fast review loop for selecting high-quality predictions
+for finetuning:
+
+- Open **Review -> Open Tracker...** and choose your tracker `.xlsx`.
+- The current stack loads with prediction overlay (raw image + red mask).
+- Use **Prev Stack/Next Stack** (or `Alt+,` / `Alt+.`) to move between zstacks.
+- Mark quality in one click:
+  - `A` = usable as-is
+  - `B` = usable after light edits
+  - `C` = not selected for the next round
+  (`Alt+1` / `Alt+2` / `Alt+3`).
+- Use the **Filter** dropdown (`All`, `Unreviewed`, `A`, `B`, `C`) to focus on a
+  subset.
+- Use **Save Corrected Mask** to write edited masks into
+  `review_corrected_masks/<GRADE>/...` and store the path back into the tracker.
+
+Tracker columns are auto-created if missing:
+`review_grade`, `review_status`, `review_note`, `review_updated_at`,
+`review_corrected_mask_path`, `review_corrected_saved_at`.
 
 ### CLI pipeline (batch evaluation)
 

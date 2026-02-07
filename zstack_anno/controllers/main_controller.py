@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QMessageBox,
     QInputDialog,
+    QComboBox,
 )
 from PyQt5.QtCore import Qt, QEvent, QPoint
 import threading
@@ -29,9 +30,10 @@ from ..utils import config
 from .file_helper import FileOpsMixin
 from .morphology_helper import MorphologyMixin, IntGrowThread
 from .script_helper import ScriptMixin
+from .review_helper import ReviewMixin
 
 
-class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
+class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, ReviewMixin):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Z-Stack Annotation (alpha)")
@@ -50,6 +52,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.cancel_event = threading.Event()
         self.grow_thread: IntGrowThread | None = None
         self.script_editor: ScriptEditor | None = None
+        self._init_review_state()
         self._build_layout()
         self._create_menu()
         self.statusBar().showMessage("Ready")
@@ -87,6 +90,43 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         nav_layout.addWidget(self.slider)
         nav_layout.addWidget(self.next_btn)
         layout.addLayout(nav_layout)
+
+        review_layout = QHBoxLayout()
+        self.review_open_btn = QPushButton("Open Review Tracker")
+        self.review_open_btn.clicked.connect(self._open_review_tracker)
+        self.review_prev_stack_btn = QPushButton("Prev Stack")
+        self.review_prev_stack_btn.clicked.connect(self._review_prev_stack)
+        self.review_next_stack_btn = QPushButton("Next Stack")
+        self.review_next_stack_btn.clicked.connect(self._review_next_stack)
+        self.review_filter_combo = QComboBox()
+        self.review_filter_combo.addItems(["All", "Unreviewed", "A", "B", "C"])
+        self.review_filter_combo.currentTextChanged.connect(self._review_on_filter_changed)
+        self.review_grade_combo = QComboBox()
+        self.review_grade_combo.addItems(["Unreviewed", "A", "B", "C"])
+        self.review_grade_combo.currentTextChanged.connect(self._review_on_grade_combo_changed)
+        self.review_mark_a_btn = QPushButton("Mark A")
+        self.review_mark_a_btn.clicked.connect(self._review_mark_a)
+        self.review_mark_b_btn = QPushButton("Mark B")
+        self.review_mark_b_btn.clicked.connect(self._review_mark_b)
+        self.review_mark_c_btn = QPushButton("Mark C")
+        self.review_mark_c_btn.clicked.connect(self._review_mark_c)
+        self.review_save_corrected_btn = QPushButton("Save Corrected Mask")
+        self.review_save_corrected_btn.clicked.connect(self._review_save_corrected_mask)
+        self.review_info_label = QLabel("Review: tracker not loaded")
+        review_layout.addWidget(self.review_open_btn)
+        review_layout.addWidget(self.review_prev_stack_btn)
+        review_layout.addWidget(self.review_next_stack_btn)
+        review_layout.addWidget(QLabel("Filter"))
+        review_layout.addWidget(self.review_filter_combo)
+        review_layout.addWidget(QLabel("Grade"))
+        review_layout.addWidget(self.review_grade_combo)
+        review_layout.addWidget(self.review_mark_a_btn)
+        review_layout.addWidget(self.review_mark_b_btn)
+        review_layout.addWidget(self.review_mark_c_btn)
+        review_layout.addWidget(self.review_save_corrected_btn)
+        review_layout.addWidget(self.review_info_label, 1)
+        layout.addLayout(review_layout)
+        self._set_review_controls_enabled(False)
 
         layout.addWidget(self.canvas)
         # -------- Controls --------
@@ -356,6 +396,28 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         # it alongside Alt/Meta for cross-platform compatibility.
         validate_act.setShortcuts(["Alt+T", "Ctrl+T", "Meta+T"])
 
+        review_menu = self.menuBar().addMenu("Review")
+        review_open_act = review_menu.addAction("Open Tracker…")
+        review_open_act.triggered.connect(self._open_review_tracker)
+        review_prev_act = review_menu.addAction("Previous Stack")
+        review_prev_act.triggered.connect(self._review_prev_stack)
+        review_prev_act.setShortcuts(["Alt+,"])
+        review_next_act = review_menu.addAction("Next Stack")
+        review_next_act.triggered.connect(self._review_next_stack)
+        review_next_act.setShortcuts(["Alt+."])
+        mark_a_act = review_menu.addAction("Mark A")
+        mark_a_act.triggered.connect(self._review_mark_a)
+        mark_a_act.setShortcuts(["Alt+1"])
+        mark_b_act = review_menu.addAction("Mark B")
+        mark_b_act.triggered.connect(self._review_mark_b)
+        mark_b_act.setShortcuts(["Alt+2"])
+        mark_c_act = review_menu.addAction("Mark C")
+        mark_c_act.triggered.connect(self._review_mark_c)
+        mark_c_act.setShortcuts(["Alt+3"])
+        save_corr_act = review_menu.addAction("Save Corrected Mask")
+        save_corr_act.triggered.connect(self._review_save_corrected_mask)
+        save_corr_act.setShortcuts(["Alt+Shift+S"])
+
         help_menu = self.menuBar().addMenu("Help")
         help_act = help_menu.addAction("Shortcuts && Features")
         help_act.triggered.connect(self._show_help)
@@ -452,6 +514,21 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
     # 键盘快捷
     def _handle_key(self, event):
         if not self.slider.isEnabled():
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_Period:
+            self._review_next_stack()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_Comma:
+            self._review_prev_stack()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_1:
+            self._review_mark_a()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_2:
+            self._review_mark_b()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_3:
+            self._review_mark_c()
             return
         if event.key() in (Qt.Key_Up, Qt.Key_Left):
             self.slider.setValue(max(0, self.slider.value() - 1))
@@ -673,6 +750,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         text = (
             "Keyboard Shortcuts:\n"
             "  Arrow keys - previous/next slice\n"
+            "  Alt+, / Alt+. - previous/next review stack\n"
+            "  Alt+1 / Alt+2 / Alt+3 - mark review A/B/C\n"
             "  D/E - dilate/erode current mask\n"
             "  Z/X - undo/redo\n"
             "  \u2318D or \u2325D - clear foreground on current slice\n"
@@ -682,6 +761,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             "  Right click drag - delete masks touching drag rectangle\n\n"
             "Toolbar Buttons:\n"
             "  Prev/Next - move one slice backward or forward\n"
+            "  Prev Stack/Next Stack - move between raw+prediction pairs from the review tracker\n"
             "  Slider - jump to a specific slice index\n"
             "  Dilate/Erode/Skeleton - basic mask operations; Strength sets iteration count\n"
             "  Filter </spin - remove small components by pixel count\n"
@@ -695,7 +775,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             "  Quick Save - save masks to the default path\n\n"
             "Menus provide the same actions as the toolbar.\n"
             "Zoom with mouse wheel when over the image.\n"
-            "Use Tools -> Script Editor to automate sequences of these actions"
+            "Use Tools -> Script Editor to automate sequences of these actions.\n"
+            "Use Review controls to classify stacks as A/B/C and save corrected masks."
         )
         QMessageBox.information(self, "Help", text)
 
@@ -813,4 +894,3 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         if not ok:
             return
         self.script_shortest_path(y0, x0, y1, x1)
-
