@@ -384,15 +384,22 @@ def threshold_normalized(slice_: np.ndarray, percent: float) -> np.ndarray:
 
 def histogram_stretch(slice_: np.ndarray, percentile: float) -> np.ndarray:
     """Stretch contrast of a slice using percentile exclusion."""
-    low = np.percentile(slice_, percentile)
-    high = np.percentile(slice_, 100 - percentile)
+    pct = float(percentile)
+    if not np.isfinite(pct):
+        return slice_.copy()
+    # Keep the two percentiles separated to avoid degenerate ranges.
+    pct = min(max(pct, 0.0), 49.9)
+
+    arr = slice_.astype(np.float32, copy=False)
+    low = np.percentile(arr, pct)
+    high = np.percentile(arr, 100.0 - pct)
     if high <= low:
         return slice_.copy()
-    scaled = (slice_ - low) / (high - low)
+    scaled = (arr - low) / (high - low)
     scaled = np.clip(scaled, 0, 1)
     if np.issubdtype(slice_.dtype, np.integer):
         info = np.iinfo(slice_.dtype)
-        scaled = (scaled * info.max).astype(slice_.dtype)
+        scaled = np.rint(scaled * info.max).astype(slice_.dtype)
     else:
         scaled = scaled.astype(slice_.dtype)
     return scaled
@@ -400,7 +407,10 @@ def histogram_stretch(slice_: np.ndarray, percentile: float) -> np.ndarray:
 
 def histogram_stretch_stack(stack: np.ndarray, percentile: float) -> np.ndarray:
     """Apply ``histogram_stretch`` to every slice of a stack."""
-    return np.stack([histogram_stretch(s, percentile) for s in stack])
+    out = np.empty_like(stack)
+    for i in range(stack.shape[0]):
+        out[i] = histogram_stretch(stack[i], percentile)
+    return out
 
 
 def remove_mask_background(

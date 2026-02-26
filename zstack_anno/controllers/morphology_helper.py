@@ -188,11 +188,21 @@ class MorphologyMixin:
         except ValueError:
             pct = 0.0
         self._push_undo("stretch", mask=None)
-        if pct <= 0:
+        try:
+            if pct <= 0:
+                self.model.reset_contrast()
+            else:
+                self.model.histogram_stretch(pct)
+            self._update_view()
+        except Exception as exc:
+            # Keep UI alive even if a bad stack or parameter triggers an error.
             self.model.reset_contrast()
-        else:
-            self.model.histogram_stretch(pct)
-        self._update_view()
+            self._update_view()
+            QMessageBox.warning(
+                self,
+                "Histogram Stretch",
+                f"Stretch failed and was reverted.\n{exc}",
+            )
 
     def _apply_blur(self: "MainController") -> None:
         if self.model.data is None:
@@ -333,4 +343,26 @@ class MorphologyMixin:
         self._push_undo("clear_foreground")
         blank = np.zeros_like(self.model.get_mask())
         self.model.set_mask(blank)
+        self._update_view()
+
+    def _clear_to_current_slice(self: "MainController") -> None:
+        """Clear masks on slices [0, current]."""
+        if self.model.masks is None:
+            return
+        self._push_undo("clear_to_current")
+        idx = int(self.model.index)
+        self.model.masks[: idx + 1] = 0
+        self.model.mask_dirty = True
+        self.model.update_components()
+        self._update_view()
+
+    def _clear_from_current_slice(self: "MainController") -> None:
+        """Clear masks on slices [current, end]."""
+        if self.model.masks is None:
+            return
+        self._push_undo("clear_from_current")
+        idx = int(self.model.index)
+        self.model.masks[idx:] = 0
+        self.model.mask_dirty = True
+        self.model.update_components()
         self._update_view()

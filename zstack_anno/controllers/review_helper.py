@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
+import shutil
 from typing import TYPE_CHECKING
 
+import tifffile
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
 from ..utils.review_utils import (
@@ -14,6 +16,10 @@ from ..utils.review_utils import (
 
 if TYPE_CHECKING:  # pragma: no cover
     from .main_controller import MainController
+
+DEFAULT_REVIEW_TRACKER_WINDOWS = (
+    r"D:\Research\Image Analysis\Confocal Myelin data\zstack_annotation_tracker_2026-02-06.xlsx"
+)
 
 
 class ReviewMixin:
@@ -35,10 +41,16 @@ class ReviewMixin:
 
     # --------- public actions ---------
     def _open_review_tracker(self: "MainController") -> None:
+        # Project default: auto-load the shared tracker if it exists.
+        default_local = windows_to_local_path(DEFAULT_REVIEW_TRACKER_WINDOWS)
+        if default_local and os.path.exists(default_local):
+            self._load_review_tracker(default_local)
+            return
+
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Review Tracker",
-            self._review_tracker_path or "",
+            self._review_tracker_path or default_local or "",
             "Excel Files (*.xlsx)",
         )
         if not path:
@@ -102,13 +114,121 @@ class ReviewMixin:
             if ret != QMessageBox.Yes:
                 return
 
-        self.model.save_masks(out_path)
+        metadata = self._review_build_corrected_mask_metadata(item, out_path)
+        self.model.save_masks(out_path, metadata=metadata)
         self._review_set_cell(item["row"], "review_corrected_mask_path", local_to_windows_path(out_path))
         self._review_set_cell(item["row"], "review_corrected_saved_at", self._review_now())
         item["corrected_path"] = out_path
         if self._review_save_tracker():
             self.statusBar().showMessage(f"Corrected mask saved: {os.path.basename(out_path)}")
         self._update_file_labels()
+
+    def _review_export_final_masks(self: "MainController") -> None:
+        if not self._review_items or not self._review_tracker_path:
+            QMessageBox.warning(self, "Export Final Masks", "Please open a review tracker first.")
+            return
+
+        reviewed = [
+            item for item in self._review_items
+            if normalize_review_grade(item.get("grade")) in {"A", "B", "C"}
+        ]
+        if not reviewed:
+            QMessageBox.information(
+                self,
+                "Export Final Masks",
+                "No reviewed A/B/C items found. Mark stacks first, then export.",
+            )
+            return
+
+        tracker_dir = os.path.dirname(self._review_tracker_path)
+        export_root = os.path.join(tracker_dir, "review_final_masks")
+        os.makedirs(export_root, exist_ok=True)
+
+        expected_files: set[str] = set()
+        copied = 0
+        missing = 0
+
+        for item in reviewed:
+            grade = normalize_review_grade(item.get("grade"))
+            if not grade:
+                continue
+            zstack_id = item.get("zstack_id") or f"row{item['row']}"
+            corrected_path = item.get("corrected_path") or ""
+            pred_path = item.get("pred_path") or ""
+
+            if corrected_path and os.path.exists(corrected_path):
+                src_path = corrected_path
+                src_kind = "corrected"
+            else:
+                src_path = pred_path
+                src_kind = "inference"
+
+            if not src_path or not os.path.exists(src_path):
+                missing += 1
+                continue
+
+            out_dir = os.path.join(export_root, grade)
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"{zstack_id}_final_mask.tif")
+            expected_files.add(os.path.abspath(out_path))
+
+            try:
+                if os.path.abspath(src_path) != os.path.abspath(out_path):
+                    shutil.copy2(src_path, out_path)
+                copied += 1
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Export Final Masks",
+                    f"Failed to export mask for {zstack_id}:\n{exc}",
+                )
+                return
+
+            self._review_set_cell(item["row"], "review_final_mask_path", local_to_windows_path(out_path))
+            self._review_set_cell(item["row"], "review_final_mask_source", src_kind)
+            self._review_set_cell(item["row"], "review_final_exported_at", self._review_now())
+
+        stale_files: list[str] = []
+        for root, _dirs, files in os.walk(export_root):
+            for name in files:
+                if not name.lower().endswith((".tif", ".tiff")):
+                    continue
+                path = os.path.abspath(os.path.join(root, name))
+                if path not in expected_files:
+                    stale_files.append(path)
+
+        deleted = 0
+        if stale_files:
+            ret = QMessageBox.question(
+                self,
+                "Export Final Masks",
+                (
+                    f"Found {len(stale_files)} stale files in review_final_masks.\n"
+                    "Delete them now?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if ret == QMessageBox.Yes:
+                for path in stale_files:
+                    try:
+                        os.remove(path)
+                        deleted += 1
+                    except Exception:
+                        continue
+
+                for grade in ("A", "B", "C", "UNREVIEWED"):
+                    grade_dir = os.path.join(export_root, grade)
+                    if os.path.isdir(grade_dir) and not os.listdir(grade_dir):
+                        try:
+                            os.rmdir(grade_dir)
+                        except Exception:
+                            pass
+
+        if self._review_save_tracker():
+            self.statusBar().showMessage(
+                f"Exported final masks: {copied} | missing: {missing} | deleted stale: {deleted}"
+            )
 
     # --------- tracker loading ---------
     def _load_review_tracker(self: "MainController", path: str) -> None:
@@ -246,6 +366,9 @@ class ReviewMixin:
             "review_updated_at",
             "review_corrected_mask_path",
             "review_corrected_saved_at",
+            "review_final_mask_path",
+            "review_final_mask_source",
+            "review_final_exported_at",
         ]
         added = False
         for name in required:
@@ -342,8 +465,18 @@ class ReviewMixin:
 
         item = self._review_items[item_index]
         try:
-            self.model.load(item["raw_path"])
             load_mask_path = item["corrected_path"] or item["pred_path"]
+            target_shape = self._review_stack_shape(load_mask_path)
+            self.model.load(item["raw_path"])
+            raw_resample_note = ""
+            if target_shape and self.model.data is not None:
+                src_shape = tuple(int(v) for v in self.model.data.shape)
+                if src_shape != target_shape:
+                    self.model.resample_image_to_shape(target_shape)
+                    raw_resample_note = (
+                        f"Raw aligned {src_shape[0]}->{target_shape[0]} "
+                        "(mask-grid review)."
+                    )
             self.model.load_masks(load_mask_path)
         except Exception as exc:
             QMessageBox.warning(self, "Review Load", f"Failed to load review pair:\n{exc}")
@@ -359,8 +492,14 @@ class ReviewMixin:
         self._sync_review_grade_from_item(item)
         self._update_view(reset_view=True)
         self._review_update_info_label()
+        notes = []
+        if raw_resample_note:
+            notes.append(raw_resample_note)
+        if self.model.mask_alignment_note:
+            notes.append(self.model.mask_alignment_note)
         self.statusBar().showMessage(
             f"Loaded review item {pos + 1}/{len(self._review_filtered_indices)}: {item['zstack_id']}"
+            + (f" | {' '.join(notes)}" if notes else "")
         )
 
     # --------- ui helpers ---------
@@ -374,6 +513,7 @@ class ReviewMixin:
             "review_mark_b_btn",
             "review_mark_c_btn",
             "review_save_corrected_btn",
+            "review_export_final_btn",
         ]
         for name in widgets:
             widget = getattr(self, name, None)
@@ -472,6 +612,87 @@ class ReviewMixin:
         os.makedirs(out_dir, exist_ok=True)
         zstack_id = item.get("zstack_id") or f"row{item['row']}"
         return os.path.join(out_dir, f"{zstack_id}_review_mask.tif")
+
+    def _review_build_corrected_mask_metadata(
+        self: "MainController", item: dict, out_path: str
+    ) -> dict:
+        """Build pairing metadata to embed in corrected mask TIFF."""
+        raw_path = item.get("raw_path") or ""
+        pred_path = item.get("pred_path") or ""
+        loaded_mask_path = item.get("corrected_path") or pred_path
+
+        raw_shape = self._review_stack_shape(raw_path) if raw_path else None
+        review_shape = tuple(int(v) for v in self.model.data.shape) if self.model.data is not None else None
+        mask_shape = tuple(int(v) for v in self.model.masks.shape) if self.model.masks is not None else None
+        pixel_sizes = self.model.get_pixel_sizes()
+
+        scale_zyx = None
+        if raw_shape and mask_shape and raw_shape[0] > 0 and raw_shape[1] > 0 and raw_shape[2] > 0:
+            scale_zyx = [
+                float(mask_shape[0]) / float(raw_shape[0]),
+                float(mask_shape[1]) / float(raw_shape[1]),
+                float(mask_shape[2]) / float(raw_shape[2]),
+            ]
+
+        return {
+            "schema": "myelin_review_pairing_v1",
+            "saved_at": self._review_now(),
+            "tool": "Myelin_anno_tool",
+            "review": {
+                "zstack_id": item.get("zstack_id"),
+                "grade": normalize_review_grade(item.get("grade")) or "UNREVIEWED",
+                "row": item.get("row"),
+                "tracker_path_windows": local_to_windows_path(self._review_tracker_path or ""),
+            },
+            "pairing": {
+                "source_raw_id": item.get("zstack_id"),
+                "raw_path_local": raw_path,
+                "raw_path_windows": local_to_windows_path(raw_path),
+                "prediction_path_local": pred_path,
+                "prediction_path_windows": local_to_windows_path(pred_path),
+                "prediction_file_name": os.path.basename(pred_path) if pred_path else "",
+                "loaded_mask_source_local": loaded_mask_path,
+                "loaded_mask_source_windows": local_to_windows_path(loaded_mask_path),
+                "corrected_mask_output_local": out_path,
+                "corrected_mask_output_windows": local_to_windows_path(out_path),
+            },
+            "dimensions": {
+                "raw_original_zyx": list(raw_shape) if raw_shape else None,
+                "review_image_zyx": list(review_shape) if review_shape else None,
+                "saved_mask_zyx": list(mask_shape) if mask_shape else None,
+                "raw_resampled_for_review": bool(raw_shape and review_shape and raw_shape != review_shape),
+                "resample_policy": "raw_to_mask_grid",
+                "raw_to_mask_scale_zyx": scale_zyx,
+            },
+            "physical_size_um": {
+                "review_grid_xyz": list(pixel_sizes) if pixel_sizes else None,
+            },
+        }
+
+    @staticmethod
+    def _review_stack_shape(path: str) -> tuple[int, int, int] | None:
+        """Return stack shape as (Z, Y, X), squeezing singleton dims when needed."""
+        try:
+            with tifffile.TiffFile(path) as tf:
+                if tf.series:
+                    shape = tuple(int(v) for v in tf.series[0].shape)
+                else:
+                    page = tf.pages[0]
+                    shape = (len(tf.pages), int(page.shape[0]), int(page.shape[1]))
+        except Exception:
+            return None
+
+        if len(shape) == 2:
+            return (1, shape[0], shape[1])
+        if len(shape) == 3:
+            return shape
+        if len(shape) == 4:
+            # Common cases: (1, Z, Y, X) or (Z, 1, Y, X)
+            squeezed = tuple(v for v in shape if v != 1)
+            if len(squeezed) == 3:
+                return squeezed
+            return shape[-3:]
+        return None
 
     def _review_save_tracker(self: "MainController") -> bool:
         if self._review_wb is None or not self._review_tracker_path:

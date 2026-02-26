@@ -26,6 +26,13 @@ class ScriptMixin:
         grow_limit: int = 30000,
         bg2_percentile: float = 12.0,
         bg2_bins: int = 0,
+        final_bg_repeat: int = 5,
+        final_bg_percentile: float = 5.0,
+        final_bg_bins: int = 5,
+        final_small_threshold: int = 20,
+        addition_support_percentile: float = 75.0,
+        protect_small_original: bool = True,
+        small_component_guard: int = 120,
         show_status: bool = True,
     ) -> dict[str, int] | None:
         """Run the default quick-fix pipeline on the current slice.
@@ -43,7 +50,8 @@ class ScriptMixin:
         if not self._ensure_masks():
             return None
 
-        before_pixels = int(np.count_nonzero(self.model.get_mask()))
+        original_mask = self.model.get_mask().copy()
+        before_pixels = int(np.count_nonzero(original_mask))
         start = time.monotonic()
 
         # Use negative values as "disabled" sentinels so this action remains
@@ -62,14 +70,44 @@ class ScriptMixin:
             limit=limit,
         )
         self.script_bg_filter(percentile=bg2_percentile, bins=bg2_bins)
-        after_pixels = int(np.count_nonzero(self.model.get_mask()))
+        for _ in range(max(0, int(final_bg_repeat))):
+            self.script_bg_filter(percentile=final_bg_percentile, bins=final_bg_bins)
+        if final_small_threshold > 0:
+            self.script_filter_small(threshold=int(final_small_threshold))
+
+        # Post-guard 1: only keep new additions that have enough intensity support.
+        cur_mask = self.model.get_mask().copy()
+        if addition_support_percentile >= 0:
+            img = self.model._extract_slice(self.model.index).astype(float)
+            support_thresh = float(np.percentile(img, addition_support_percentile))
+            support = img >= support_thresh
+            additions = (cur_mask > 0) & (original_mask == 0)
+            cur_mask[additions & ~support] = 0
+
+        # Post-guard 2: protect tiny original components from being erased.
+        if protect_small_original and small_component_guard > 0:
+            labels = morphology_tools.label_components(original_mask)
+            if labels.size > 0:
+                counts = np.bincount(labels.ravel())
+                if counts.size > 1:
+                    keep_ids = np.where(
+                        (np.arange(counts.size) > 0) & (counts <= small_component_guard)
+                    )[0]
+                    if keep_ids.size > 0:
+                        protected = np.isin(labels, keep_ids)
+                        cur_mask[protected] = 1
+
+        self.model.set_mask(cur_mask)
+        self._update_view()
+        after_pixels = int(np.count_nonzero(cur_mask))
 
         elapsed = time.monotonic() - start
         if show_status:
             self.statusBar().showMessage(
                 (
                     f"Quick script finished in {elapsed:.2f}s "
-                    f"(seed->dilate->bg->grow->bg) | pixels {before_pixels} -> {after_pixels}"
+                    f"(seed->dilate->bg->grow->bg + tail cleanup) | "
+                    f"pixels {before_pixels} -> {after_pixels}"
                 )
             )
         return {"before_pixels": before_pixels, "after_pixels": after_pixels}

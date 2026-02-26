@@ -13,8 +13,10 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QInputDialog,
     QComboBox,
+    QSizePolicy,
 )
 from PyQt5.QtCore import Qt, QEvent, QPoint
+from PyQt5.QtGui import QCursor, QPixmap, QPainter, QPen, QColor
 import threading
 import sys
 import os
@@ -44,6 +46,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         self.history: list[str] = []
         # Brush tool settings
         self.brush_enabled: bool = False
+        self.brush_erase: bool = False
         self.brush_size: int = 5
         self._painting: bool = False
         self._last_pos = None
@@ -115,6 +118,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         self.review_mark_c_btn.clicked.connect(self._review_mark_c)
         self.review_save_corrected_btn = QPushButton("Save Corrected Mask")
         self.review_save_corrected_btn.clicked.connect(self._review_save_corrected_mask)
+        self.review_export_final_btn = QPushButton("Export Final Masks")
+        self.review_export_final_btn.clicked.connect(self._review_export_final_masks)
         self.quick_auto_preset_combo = QComboBox()
         self.quick_auto_preset_combo.addItem("Conservative", "conservative")
         self.quick_auto_preset_combo.addItem("Balanced", "balanced")
@@ -139,6 +144,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         review_layout.addWidget(self.review_mark_b_btn)
         review_layout.addWidget(self.review_mark_c_btn)
         review_layout.addWidget(self.review_save_corrected_btn)
+        review_layout.addWidget(self.review_export_final_btn)
         review_layout.addWidget(QLabel("Auto Preset"))
         review_layout.addWidget(self.quick_auto_preset_combo)
         review_layout.addWidget(self.quick_auto_btn)
@@ -170,6 +176,10 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         self.filter_spin = QSpinBox()
         self.filter_spin.setRange(1, 10000)
         self.filter_spin.setValue(100)
+        self.clear_prev_btn = QPushButton("Clear <= Slice")
+        self.clear_prev_btn.clicked.connect(self._clear_to_current_slice)
+        self.clear_next_btn = QPushButton("Clear >= Slice")
+        self.clear_next_btn.clicked.connect(self._clear_from_current_slice)
         mask_layout.addWidget(self.dilate_btn)
         mask_layout.addWidget(self.erode_btn)
         mask_layout.addWidget(self.close_btn)
@@ -177,6 +187,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         mask_layout.addWidget(self.skeleton_btn)
         mask_layout.addWidget(self.filter_btn)
         mask_layout.addWidget(self.filter_spin)
+        mask_layout.addWidget(self.clear_prev_btn)
+        mask_layout.addWidget(self.clear_next_btn)
         self.mask_vis_label = QLabel("Mask Visibility")
         self.mask_vis_slider = QSlider(Qt.Horizontal)
         self.mask_vis_slider.setRange(0, 100)
@@ -260,6 +272,12 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         ctrl.addWidget(self.info_label)
         # Label to show current cursor position and pixel value
         self.cursor_label = QLabel("")
+        cursor_width = self.cursor_label.fontMetrics().horizontalAdvance(
+            "Pos: (00000, 00000)  Value: 65535"
+        )
+        self.cursor_label.setFixedWidth(cursor_width + 16)
+        self.cursor_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        self.cursor_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         ctrl.addWidget(self.cursor_label)
         layout.addLayout(ctrl)
         self.setCentralWidget(central)
@@ -446,6 +464,9 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         save_corr_act = review_menu.addAction("Save Corrected Mask")
         save_corr_act.triggered.connect(self._review_save_corrected_mask)
         save_corr_act.setShortcuts(["Alt+Shift+S"])
+        export_final_act = review_menu.addAction("Export Final Masks")
+        export_final_act.triggered.connect(self._review_export_final_masks)
+        export_final_act.setShortcuts(["Alt+Shift+F"])
 
         help_menu = self.menuBar().addMenu("Help")
         help_act = help_menu.addAction("Shortcuts && Features")
@@ -477,7 +498,14 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
 
     def _update_view(self, reset_view: bool = False):
         self.canvas.set_image(self.model.get_current(), reset_view=reset_view)
-        mask = self.model.get_mask() if self.model.masks is not None else None
+        mask = None
+        if self.model.masks is not None:
+            try:
+                mask = self.model.get_mask()
+            except Exception:
+                # Keep UI responsive even if an external mask file has
+                # unexpected depth/shape; image display should remain usable.
+                mask = None
         self.canvas.set_mask(mask)
         self.statusBar().showMessage(
             f"Slice {self.model.index + 1} / {self.model.n_slices}")
@@ -591,16 +619,33 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             self._redo()
         elif event.key() == Qt.Key_P:
             self.brush_enabled = not self.brush_enabled
+            self._sync_brush_cursor()
+            if self.brush_enabled:
+                mode = "Eraser" if self.brush_erase else "Brush"
+                self.statusBar().showMessage(f"{mode} ON")
+            else:
+                self.statusBar().showMessage("Brush OFF")
+        elif event.key() == Qt.Key_L:
+            if not self.brush_enabled:
+                self.brush_enabled = True
+                self.brush_erase = True
+            else:
+                self.brush_erase = not self.brush_erase
+            self._sync_brush_cursor()
             self.statusBar().showMessage(
-                "Brush ON" if self.brush_enabled else "Brush OFF")
+                "Eraser ON" if self.brush_erase else "Brush ON"
+            )
         elif event.key() == Qt.Key_H:
             self.brush_enabled = False
             self.canvas.setDragMode(self.canvas.ScrollHandDrag)
+            self._sync_brush_cursor()
             self.statusBar().showMessage("Hand tool")
         elif event.key() == Qt.Key_BracketLeft:
             self.brush_size = max(1, self.brush_size - 1)
+            self._sync_brush_cursor()
         elif event.key() == Qt.Key_BracketRight:
             self.brush_size += 1
+            self._sync_brush_cursor()
 
 
     def report_action(self, action: str, params: dict) -> None:
@@ -692,7 +737,13 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         y1 = min(mask.shape[0], y + half + 1)
         x0 = max(0, x - half)
         x1 = min(mask.shape[1], x + half + 1)
-        mask[y0:y1, x0:x1] = 1
+        yy, xx = np.ogrid[y0:y1, x0:x1]
+        radius = max(1.0, self.brush_size / 2.0)
+        circle = (yy - y) ** 2 + (xx - x) ** 2 <= radius ** 2
+        value = 0 if self.brush_erase else 1
+        patch = mask[y0:y1, x0:x1]
+        patch[circle] = value
+        mask[y0:y1, x0:x1] = patch
         self.canvas.set_mask(mask)
 
     def _start_paint(self, pos) -> None:
@@ -760,6 +811,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
     def toggle_select_mode(self) -> None:
         """Toggle the brush selection mode."""
         self.brush_enabled = not self.brush_enabled
+        self._sync_brush_cursor()
 
     def _delete_single_area(self, pos) -> None:
         """Delete the component under a clicked position."""
@@ -790,6 +842,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             "  Arrow keys - previous/next slice\n"
             "  Alt+, / Alt+. - previous/next review stack\n"
             "  Alt+1 / Alt+2 / Alt+3 - mark review A/B/C\n"
+            "  Alt+Shift+F - export reviewed final masks (A/B/C)\n"
             "  Alt+Q - run quick auto script (seed->dilate->bg->grow->bg)\n"
             "  Alt+W - run quick auto on current stack/range\n"
             "  Alt+Shift+Q - revert to pre-auto snapshot\n"
@@ -797,12 +850,14 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             "  Z/X - undo/redo\n"
             "  \u2318D or \u2325D - clear foreground on current slice\n"
             "  P - toggle brush painting\n"
+            "  L - toggle eraser mode (brush paints background)\n"
             "  [ and ] - change brush size\n"
             "  H - hand tool (panning)\n"
             "  Right click drag - delete masks touching drag rectangle\n\n"
             "Toolbar Buttons:\n"
             "  Prev/Next - move one slice backward or forward\n"
             "  Prev Stack/Next Stack - move between raw+prediction pairs from the review tracker\n"
+            "  Export Final Masks - build unified final mask set from reviewed items\n"
             "  Auto Preset - choose conservative/balanced/aggressive parameters\n"
             "  Quick Auto Script - run default cleanup pipeline on current slice\n"
             "  Quick Auto Stack - run quick auto on all slices or a selected range\n"
@@ -810,6 +865,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             "  Slider - jump to a specific slice index\n"
             "  Dilate/Erode/Skeleton - basic mask operations; Strength sets iteration count\n"
             "  Filter </spin - remove small components by pixel count\n"
+            "  Clear <= Slice - clear labels on current and all previous slices\n"
+            "  Clear >= Slice - clear labels on current and all following slices\n"
             "  Threshold Abs/Norm - threshold by value or percentage\n"
             "  Seed %/Pix % + Seed - create mask seeds above intensity percentile\n"
             "  Diff %/Hist % + Int Grow - expand mask using intensity difference and optional histogram cutoff\n"
@@ -836,6 +893,33 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         if metrics is None:
             return
         self._post_quick_auto_quality_gate(metrics, context_label="current slice")
+
+    def _sync_brush_cursor(self) -> None:
+        if not self.brush_enabled:
+            self.canvas.viewport().unsetCursor()
+            self.canvas.setDragMode(self.canvas.ScrollHandDrag)
+            return
+        self.canvas.setDragMode(self.canvas.NoDrag)
+        self.canvas.viewport().setCursor(self._make_brush_cursor())
+
+    def _make_brush_cursor(self) -> QCursor:
+        radius = max(3, int(round(self.brush_size / 2.0)))
+        size = max(18, radius * 2 + 8)
+        center = size // 2
+        pix = QPixmap(size, size)
+        pix.fill(Qt.transparent)
+
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        color = QColor(255, 80, 80, 220) if self.brush_erase else QColor(0, 220, 120, 220)
+        painter.setPen(QPen(color, 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(center - radius, center - radius, radius * 2, radius * 2)
+        painter.setPen(QPen(color, 1))
+        painter.drawLine(center - 3, center, center + 3, center)
+        painter.drawLine(center, center - 3, center, center + 3)
+        painter.end()
+        return QCursor(pix, center, center)
 
     def _run_quick_auto_stack(self) -> None:
         if self.model.data is None:
@@ -923,43 +1007,52 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         preset = self.quick_auto_preset_combo.currentData()
         presets: dict[str, dict[str, object]] = {
             "conservative": {
-                "seed_percentile": 90.0,
-                "seed_pixel_percent": 0.6,
+                "seed_percentile": 94.0,
+                "seed_pixel_percent": 0.25,
+                "dilate_iterations": 1,
+                "bg1_percentile": 12.0,
+                "bg1_bins": 0,
+                "grow_diff_pct": 20.0,
+                "grow_hist_pct": 30.0,
+                "grow_force_pct": -1.0,
+                "grow_limit": 8000,
+                "bg2_percentile": 20.0,
+                "bg2_bins": 0,
+                "addition_support_percentile": 82.0,
+                "protect_small_original": True,
+                "small_component_guard": 140,
+            },
+            "aggressive": {
+                "seed_percentile": 88.0,
+                "seed_pixel_percent": 0.8,
+                "dilate_iterations": 1,
+                "bg1_percentile": 9.0,
+                "bg1_bins": 0,
+                "grow_diff_pct": 32.0,
+                "grow_hist_pct": 22.0,
+                "grow_force_pct": -1.0,
+                "grow_limit": 22000,
+                "bg2_percentile": 13.0,
+                "bg2_bins": 0,
+                "addition_support_percentile": 72.0,
+                "protect_small_original": True,
+                "small_component_guard": 110,
+            },
+            "balanced": {
+                "seed_percentile": 92.0,
+                "seed_pixel_percent": 0.45,
                 "dilate_iterations": 1,
                 "bg1_percentile": 10.0,
                 "bg1_bins": 0,
-                "grow_diff_pct": 28.0,
-                "grow_hist_pct": 25.0,
+                "grow_diff_pct": 26.0,
+                "grow_hist_pct": 28.0,
                 "grow_force_pct": -1.0,
-                "grow_limit": 18000,
-                "bg2_percentile": 15.0,
+                "grow_limit": 14000,
+                "bg2_percentile": 16.0,
                 "bg2_bins": 0,
-            },
-            "aggressive": {
-                "seed_percentile": 80.0,
-                "seed_pixel_percent": 1.4,
-                "dilate_iterations": 2,
-                "bg1_percentile": 6.0,
-                "bg1_bins": 0,
-                "grow_diff_pct": 45.0,
-                "grow_hist_pct": 15.0,
-                "grow_force_pct": 92.0,
-                "grow_limit": 50000,
-                "bg2_percentile": 8.0,
-                "bg2_bins": 0,
-            },
-            "balanced": {
-                "seed_percentile": 85.0,
-                "seed_pixel_percent": 1.0,
-                "dilate_iterations": 1,
-                "bg1_percentile": 8.0,
-                "bg1_bins": 0,
-                "grow_diff_pct": 35.0,
-                "grow_hist_pct": 20.0,
-                "grow_force_pct": -1.0,
-                "grow_limit": 30000,
-                "bg2_percentile": 12.0,
-                "bg2_bins": 0,
+                "addition_support_percentile": 78.0,
+                "protect_small_original": True,
+                "small_component_guard": 120,
             },
         }
         return presets.get(preset, presets["balanced"]).copy()
@@ -986,15 +1079,11 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         self.model.masks = self._quick_auto_snapshot_masks.copy()
         self.model.update_components()
         self.model.mask_dirty = True
+        target_index = max(0, min(self.model.n_slices - 1, self._quick_auto_snapshot_index))
+        self.model.index = target_index
         if self.slider.isEnabled():
-            self.slider.setValue(
-                max(0, min(self.model.n_slices - 1, self._quick_auto_snapshot_index))
-            )
-        else:
-            self.model.index = max(
-                0, min(self.model.n_slices - 1, self._quick_auto_snapshot_index)
-            )
-            self._update_view()
+            self.slider.setValue(target_index)
+        self._update_view()
         self.statusBar().showMessage(
             f"Reverted to snapshot: {self._quick_auto_snapshot_label}"
         )
@@ -1006,10 +1095,20 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         area = int(self.model.get_mask().size)
         preset = self.quick_auto_preset_combo.currentData()
         gate_cfg = {
-            "conservative": {"max_growth_pct": 180.0, "max_area_if_empty_pct": 12.0},
-            "balanced": {"max_growth_pct": 280.0, "max_area_if_empty_pct": 20.0},
-            "aggressive": {"max_growth_pct": 450.0, "max_area_if_empty_pct": 30.0},
-        }.get(preset, {"max_growth_pct": 280.0, "max_area_if_empty_pct": 20.0})
+            "conservative": {"max_growth_pct": 120.0, "max_area_if_empty_pct": 8.0, "max_area_pct": 35.0},
+            "balanced": {"max_growth_pct": 180.0, "max_area_if_empty_pct": 12.0, "max_area_pct": 45.0},
+            "aggressive": {"max_growth_pct": 260.0, "max_area_if_empty_pct": 18.0, "max_area_pct": 58.0},
+        }.get(preset, {"max_growth_pct": 180.0, "max_area_if_empty_pct": 12.0, "max_area_pct": 45.0})
+
+        area_pct = after * 100.0 / float(max(area, 1))
+        if area_pct > gate_cfg["max_area_pct"]:
+            return (
+                False,
+                (
+                    f"Foreground coverage too large: {area_pct:.1f}% "
+                    f"(limit {gate_cfg['max_area_pct']:.1f}%)."
+                ),
+            )
 
         if before > 0:
             growth_pct = (after - before) * 100.0 / float(before)

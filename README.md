@@ -97,9 +97,30 @@ for finetuning:
   subset.
 - Use **Save Corrected Mask** to write edited masks into
   `review_corrected_masks/<GRADE>/...` and store the path back into the tracker.
+- Corrected masks now embed pairing metadata in TIFF `ImageDescription` (JSON):
+  raw/pred paths, zstack id, review grade, shape mapping and resample policy.
+- If raw/prediction dimensions differ, review loading now uses a **mask-grid**
+  workflow: raw stack is downsampled/resampled in memory to the prediction
+  stack shape for stable overlay and editing.
+- Corrected masks are saved on the prediction grid (same dimensions as
+  inference), so exported training masks stay consistent with downstream
+  downsampled-DZ training pipelines.
+- This keeps review/edit/export aligned with model-training data that already
+  uses a unified downsampled `dz`.
+- Use **Export Final Masks** to build a unified export under
+  `review_final_masks/<GRADE>/...` for all reviewed stacks:
+  - if a corrected mask exists, export the corrected mask
+  - otherwise export the original inference mask
+  - stale files in `review_final_masks` can be cleaned during export
 - Use **Quick Auto Script** (or `Alt+Q`) to run the default one-click pipeline
   on the current slice:
   `Seed -> Dilate -> Background Filter -> Intensity Grow -> Background Filter`.
+  The current version adds tail cleanup:
+  `Background Filter(5%, bins=5) x5 + remove components <20 px`.
+- Use **Clear <= Slice** to clear labels on the current slice and all previous
+  slices.
+- Use **Clear >= Slice** to clear labels on the current slice and all following
+  slices.
 - Use **Auto Preset** to switch quick-auto parameters:
   `Conservative / Balanced / Aggressive`.
 - Use **Quick Auto Stack** (or `Alt+W`) to run the quick-auto strategy on:
@@ -108,10 +129,18 @@ for finetuning:
 - A post-run quality gate checks abnormal foreground growth; if triggered, you
   can revert in one click to the pre-run snapshot using the popup or
   **Revert Auto Snapshot** (`Alt+Shift+Q`).
+- The gate also checks foreground coverage ratio to avoid large background
+  takeover.
+- Quick auto now includes two safeguards for small GT preservation and BG
+  suppression:
+  - keep only intensity-supported new additions
+  - protect small original components from accidental removal
 
 Tracker columns are auto-created if missing:
 `review_grade`, `review_status`, `review_note`, `review_updated_at`,
-`review_corrected_mask_path`, `review_corrected_saved_at`.
+`review_corrected_mask_path`, `review_corrected_saved_at`,
+`review_final_mask_path`, `review_final_mask_source`,
+`review_final_exported_at`.
 
 ### Shortcut Reference
 
@@ -122,6 +151,7 @@ Tracker columns are auto-created if missing:
 | `Alt+,` | Previous review stack |
 | `Alt+.` | Next review stack |
 | `Alt+1 / Alt+2 / Alt+3` | Mark current stack as A/B/C |
+| `Alt+Shift+F` | Export reviewed final masks (A/B/C) |
 | `Alt+Q` | Run quick auto on current slice |
 | `Alt+W` | Run quick auto on stack/range |
 | `Alt+Shift+Q` | Revert to pre-auto snapshot |
@@ -130,6 +160,7 @@ Tracker columns are auto-created if missing:
 | `D` / `E` | Dilate / Erode |
 | `Z` / `X` | Undo / Redo |
 | `P` | Toggle brush mode |
+| `L` | Toggle eraser mode (paint background) |
 | `[` / `]` | Brush size down/up |
 | `H` | Hand tool (panning) |
 
