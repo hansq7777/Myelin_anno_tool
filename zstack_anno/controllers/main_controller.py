@@ -98,6 +98,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         layout.addLayout(nav_layout)
 
         review_layout = QHBoxLayout()
+        self.review_build_btn = QPushButton("Build Tracker")
+        self.review_build_btn.clicked.connect(self._review_build_tracker_from_folders)
         self.review_open_btn = QPushButton("Open Review Tracker")
         self.review_open_btn.clicked.connect(self._open_review_tracker)
         self.review_prev_stack_btn = QPushButton("Prev Stack")
@@ -133,6 +135,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         self.quick_auto_revert_btn.clicked.connect(self._restore_quick_auto_snapshot)
         self.quick_auto_revert_btn.setEnabled(False)
         self.review_info_label = QLabel("Review: tracker not loaded")
+        review_layout.addWidget(self.review_build_btn)
         review_layout.addWidget(self.review_open_btn)
         review_layout.addWidget(self.review_prev_stack_btn)
         review_layout.addWidget(self.review_next_stack_btn)
@@ -444,6 +447,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         validate_act.setShortcuts(["Alt+T", "Ctrl+T", "Meta+T"])
 
         review_menu = self.menuBar().addMenu("Review")
+        review_build_act = review_menu.addAction("Build Tracker from Folders…")
+        review_build_act.triggered.connect(self._review_build_tracker_from_folders)
         review_open_act = review_menu.addAction("Open Tracker…")
         review_open_act.triggered.connect(self._open_review_tracker)
         review_prev_act = review_menu.addAction("Previous Stack")
@@ -857,6 +862,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             "Toolbar Buttons:\n"
             "  Prev/Next - move one slice backward or forward\n"
             "  Prev Stack/Next Stack - move between raw+prediction pairs from the review tracker\n"
+            "  Build Tracker - create/refresh tracker from raw+prediction folders\n"
+            "  Review selection uses random unfinished pairs (completed pairs are excluded)\n"
             "  Export Final Masks - build unified final mask set from reviewed items\n"
             "  Auto Preset - choose conservative/balanced/aggressive parameters\n"
             "  Quick Auto Script - run default cleanup pipeline on current slice\n"
@@ -878,7 +885,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             "Menus provide the same actions as the toolbar.\n"
             "Zoom with mouse wheel when over the image.\n"
             "Use Tools -> Script Editor to automate sequences of these actions.\n"
-            "Use Review controls to classify stacks as A/B/C and save corrected masks."
+            "Use Review controls to classify stacks as A/B/C and save corrected masks.\n"
+            "Saving corrected masks marks the item as completed."
         )
         QMessageBox.information(self, "Help", text)
 

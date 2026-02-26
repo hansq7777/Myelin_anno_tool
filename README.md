@@ -93,12 +93,20 @@ The **Tools** menu also includes:
 The app now supports a fast review loop for selecting high-quality predictions
 for finetuning:
 
-- Open **Review -> Open Tracker...** and choose your tracker `.xlsx`.
+- Use **Review -> Build Tracker from Folders...** to select:
+  - raw stack folder
+  - prediction folder
+  - tracker output path (`.xlsx` or `.csv`, create/refresh supported)
+- Build mode matches raw/prediction by normalized file name key and writes
+  mapping/status columns (`matched`, `raw_only`, `pred_only`).
+- Open **Review -> Open Tracker...** and choose your tracker (`.xlsx` or `.csv`).
 - Native Linux path mapping for Windows trackers:
   if tracker path columns still contain `D:\...` style paths, set
   `ZSTACK_WINDOWS_DRIVE_MAP` before launch, for example:
   `export ZSTACK_WINDOWS_DRIVE_MAP="D=/data/confocal;E=/mnt/extra"`.
 - The current stack loads with prediction overlay (raw image + red mask).
+- In `All`/`Unreviewed` filter modes, loading uses random unfinished pairs to
+  improve sample diversity.
 - On load, the app defaults to **Unreviewed** and opens the first unreviewed
   zstack automatically (falls back to **All** if none are unreviewed).
 - Use **Prev Stack/Next Stack** (or `Alt+,` / `Alt+.`) to move between zstacks.
@@ -111,6 +119,9 @@ for finetuning:
   subset.
 - Use **Save Corrected Mask** to write edited masks into
   `review_corrected_masks/<GRADE>/...` and store the path back into the tracker.
+- Saving corrected masks also marks the item as completed
+  (`review_completed=1`, `review_completed_at=...`), and completed items are
+  excluded from random selection.
 - Corrected masks now embed pairing metadata in TIFF `ImageDescription` (JSON):
   raw/pred paths, zstack id, review grade, shape mapping and resample policy.
 - If raw/prediction dimensions differ, review loading now uses a **mask-grid**

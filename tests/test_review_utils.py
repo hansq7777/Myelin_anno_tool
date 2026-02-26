@@ -1,8 +1,10 @@
 from zstack_anno.utils.review_utils import (
     normalize_review_grade,
+    is_review_completed,
     windows_to_local_path,
     local_to_windows_path,
     build_inference_name_candidates,
+    build_pair_key,
 )
 
 
@@ -56,3 +58,23 @@ def test_build_inference_name_candidates():
 
     names = build_inference_name_candidates("slice_1")
     assert names == ["slice_1.pred.ome.tif"]
+
+
+def test_is_review_completed():
+    assert is_review_completed(True) is True
+    assert is_review_completed("1") is True
+    assert is_review_completed("completed") is True
+    assert is_review_completed("", "2026-02-26 12:00:00") is True
+    assert is_review_completed("", "") is False
+
+
+def test_build_pair_key():
+    assert build_pair_key("2501_60_R_PL_S00.ome.tif") == "2501_60_r_pl_s00"
+    assert (
+        build_pair_key("2501_60_R_PL_S00.pred.ome.tif", is_prediction=True)
+        == "2501_60_r_pl_s00"
+    )
+    assert (
+        build_pair_key("sample_A01_mask.tif", is_prediction=True)
+        == "sample_a01"
+    )

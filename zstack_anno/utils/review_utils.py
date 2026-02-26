@@ -44,6 +44,51 @@ def normalize_review_grade(value: object) -> str:
     return ""
 
 
+def is_review_completed(flag: object, completed_at: object = "") -> bool:
+    """Return whether a tracker row should be treated as completed."""
+    completed_text = str(completed_at or "").strip()
+    if completed_text:
+        return True
+    if isinstance(flag, bool):
+        return flag
+    if isinstance(flag, (int, float)):
+        return flag != 0
+    text = str(flag or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "done", "completed"}
+
+
+def _strip_stack_suffix(file_name: str) -> str:
+    text = (file_name or "").strip()
+    lower = text.lower()
+    for suffix in (".ome.tiff", ".ome.tif", ".tiff", ".tif", ".czi"):
+        if lower.endswith(suffix):
+            return text[: len(text) - len(suffix)]
+    return os.path.splitext(text)[0]
+
+
+def build_pair_key(file_name: str, *, is_prediction: bool = False) -> str:
+    """Build a normalized key used to pair raw and prediction stacks."""
+    stem = _strip_stack_suffix(file_name).strip()
+    if not stem:
+        return ""
+
+    if is_prediction:
+        stem_lower = stem.lower()
+        for suffix in (
+            ".pred.ome",
+            ".pred",
+            "_pred",
+            ".mask",
+            "_mask",
+            ".inference",
+            "_inference",
+        ):
+            if stem_lower.endswith(suffix):
+                stem = stem[: len(stem) - len(suffix)]
+                break
+    return stem.strip().lower()
+
+
 def windows_to_local_path(path: str) -> str:
     """Normalize tracker path for current OS.
 
