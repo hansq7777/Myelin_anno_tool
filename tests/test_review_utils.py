@@ -31,6 +31,22 @@ def test_local_to_windows_path():
     assert local_to_windows_path(r"D:\already\windows.tif") == r"D:\already\windows.tif"
 
 
+def test_windows_to_local_path_with_drive_map(monkeypatch):
+    monkeypatch.setenv("ZSTACK_WINDOWS_DRIVE_MAP", "D=/data/myelin;E=/mnt/extra")
+    assert (
+        windows_to_local_path(r"D:\Research\Image Analysis\file.tif")
+        == "/data/myelin/Research/Image Analysis/file.tif"
+    )
+
+
+def test_local_to_windows_path_with_drive_map(monkeypatch):
+    monkeypatch.setenv("ZSTACK_WINDOWS_DRIVE_MAP", "D=/data/myelin")
+    assert (
+        local_to_windows_path("/data/myelin/Research/Image Analysis/file.tif")
+        == r"D:\Research\Image Analysis\file.tif"
+    )
+
+
 def test_build_inference_name_candidates():
     names = build_inference_name_candidates("2501_60_R_PL_S00.ome")
     assert names == [

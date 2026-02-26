@@ -15,6 +15,16 @@ After installation, run the application with:
 python -m zstack_anno
 ```
 
+On Linux you can also use:
+
+```bash
+./start_gui.sh
+```
+
+For Linux desktop use, start it inside a GUI session (X11/Wayland). If your
+system reports missing Qt platform plugin `xcb`, install distro Qt/X11 runtime
+libs first (package names vary by distro).
+
 This will launch the annotation window defined in `zstack_anno`.  The
 **Open** action accepts both TIFF and CZI files so you can view raw microscope
 data without converting first.
@@ -84,6 +94,10 @@ The app now supports a fast review loop for selecting high-quality predictions
 for finetuning:
 
 - Open **Review -> Open Tracker...** and choose your tracker `.xlsx`.
+- Native Linux path mapping for Windows trackers:
+  if tracker path columns still contain `D:\...` style paths, set
+  `ZSTACK_WINDOWS_DRIVE_MAP` before launch, for example:
+  `export ZSTACK_WINDOWS_DRIVE_MAP="D=/data/confocal;E=/mnt/extra"`.
 - The current stack loads with prediction overlay (raw image + red mask).
 - On load, the app defaults to **Unreviewed** and opens the first unreviewed
   zstack automatically (falls back to **All** if none are unreviewed).
