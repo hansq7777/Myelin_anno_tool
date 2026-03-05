@@ -74,6 +74,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         # Also filter events from the canvas viewport for painting
         self.canvas.viewport().installEventFilter(self)
         self.slider.installEventFilter(self)
+        self.title_label.installEventFilter(self)
+        self.menuBar().installEventFilter(self)
 
     def _build_layout(self):
         central = QWidget()
@@ -695,8 +697,22 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         self.history.append(action)
         self._update_view()
 
+    def _toggle_window_fit_screen(self) -> None:
+        """Toggle between normal and maximized window state."""
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
     # --------- event filter ---------
     def eventFilter(self, obj, event):
+        if (
+            obj in (self.title_label, self.menuBar())
+            and event.type() == QEvent.MouseButtonDblClick
+            and event.button() == Qt.LeftButton
+        ):
+            self._toggle_window_fit_screen()
+            return True
         if event.type() == QEvent.KeyPress:
             self._handle_key(event)
             return True
