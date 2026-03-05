@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import time
 from typing import TYPE_CHECKING
 
 from ..utils import morphology_tools
@@ -11,6 +12,105 @@ if TYPE_CHECKING:  # pragma: no cover
 
 class ScriptMixin:
     """Methods used by the ScriptEditor."""
+
+    def script_quick_seed_dilate_bg_int_bg(
+        self: "MainController",
+        seed_percentile: float = 85.0,
+        seed_pixel_percent: float = 1.0,
+        dilate_iterations: int = 1,
+        bg1_percentile: float = 8.0,
+        bg1_bins: int = 0,
+        grow_diff_pct: float = 35.0,
+        grow_hist_pct: float = 20.0,
+        grow_force_pct: float = -1.0,
+        grow_limit: int = 30000,
+        bg2_percentile: float = 12.0,
+        bg2_bins: int = 0,
+        final_bg_repeat: int = 5,
+        final_bg_percentile: float = 5.0,
+        final_bg_bins: int = 5,
+        final_small_threshold: int = 20,
+        addition_support_percentile: float = 75.0,
+        protect_small_original: bool = True,
+        small_component_guard: int = 120,
+        show_status: bool = True,
+    ) -> dict[str, int] | None:
+        """Run the default quick-fix pipeline on the current slice.
+
+        Order:
+        1) seed
+        2) dilate
+        3) background filter
+        4) intensity grow
+        5) background filter
+
+        Parameters use conservative defaults and are intended to be iterated
+        based on user feedback on different datasets.
+        """
+        if not self._ensure_masks():
+            return None
+
+        original_mask = self.model.get_mask().copy()
+        before_pixels = int(np.count_nonzero(original_mask))
+        start = time.monotonic()
+
+        # Use negative values as "disabled" sentinels so this action remains
+        # compatible with the Script Editor parameter checks.
+        hist_pct = grow_hist_pct if grow_hist_pct >= 0 else None
+        force_pct = grow_force_pct if grow_force_pct >= 0 else None
+        limit = grow_limit if grow_limit > 0 else None
+
+        self.script_seed(percentile=seed_percentile, pixel_percent=seed_pixel_percent)
+        self.script_dilate(iterations=dilate_iterations)
+        self.script_bg_filter(percentile=bg1_percentile, bins=bg1_bins)
+        self.script_int_grow(
+            diff_pct=grow_diff_pct,
+            hist_pct=hist_pct,
+            force_pct=force_pct,
+            limit=limit,
+        )
+        self.script_bg_filter(percentile=bg2_percentile, bins=bg2_bins)
+        for _ in range(max(0, int(final_bg_repeat))):
+            self.script_bg_filter(percentile=final_bg_percentile, bins=final_bg_bins)
+        if final_small_threshold > 0:
+            self.script_filter_small(threshold=int(final_small_threshold))
+
+        # Post-guard 1: only keep new additions that have enough intensity support.
+        cur_mask = self.model.get_mask().copy()
+        if addition_support_percentile >= 0:
+            img = self.model._extract_slice(self.model.index).astype(float)
+            support_thresh = float(np.percentile(img, addition_support_percentile))
+            support = img >= support_thresh
+            additions = (cur_mask > 0) & (original_mask == 0)
+            cur_mask[additions & ~support] = 0
+
+        # Post-guard 2: protect tiny original components from being erased.
+        if protect_small_original and small_component_guard > 0:
+            labels = morphology_tools.label_components(original_mask)
+            if labels.size > 0:
+                counts = np.bincount(labels.ravel())
+                if counts.size > 1:
+                    keep_ids = np.where(
+                        (np.arange(counts.size) > 0) & (counts <= small_component_guard)
+                    )[0]
+                    if keep_ids.size > 0:
+                        protected = np.isin(labels, keep_ids)
+                        cur_mask[protected] = 1
+
+        self.model.set_mask(cur_mask)
+        self._update_view()
+        after_pixels = int(np.count_nonzero(cur_mask))
+
+        elapsed = time.monotonic() - start
+        if show_status:
+            self.statusBar().showMessage(
+                (
+                    f"Quick script finished in {elapsed:.2f}s "
+                    f"(seed->dilate->bg->grow->bg + tail cleanup) | "
+                    f"pixels {before_pixels} -> {after_pixels}"
+                )
+            )
+        return {"before_pixels": before_pixels, "after_pixels": after_pixels}
 
     def script_dilate(self: "MainController", iterations: int = 1) -> None:
         if not self._ensure_masks():

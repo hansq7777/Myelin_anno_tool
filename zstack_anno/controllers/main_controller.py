@@ -12,8 +12,11 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QMessageBox,
     QInputDialog,
+    QComboBox,
+    QSizePolicy,
 )
 from PyQt5.QtCore import Qt, QEvent, QPoint
+from PyQt5.QtGui import QCursor, QPixmap, QPainter, QPen, QColor
 import threading
 import sys
 import os
@@ -29,9 +32,10 @@ from ..utils import config
 from .file_helper import FileOpsMixin
 from .morphology_helper import MorphologyMixin, IntGrowThread
 from .script_helper import ScriptMixin
+from .review_helper import ReviewMixin
 
 
-class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
+class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, ReviewMixin):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Z-Stack Annotation (alpha)")
@@ -42,6 +46,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.history: list[str] = []
         # Brush tool settings
         self.brush_enabled: bool = False
+        self.brush_erase: bool = False
         self.brush_size: int = 5
         self._painting: bool = False
         self._last_pos = None
@@ -50,6 +55,10 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.cancel_event = threading.Event()
         self.grow_thread: IntGrowThread | None = None
         self.script_editor: ScriptEditor | None = None
+        self._quick_auto_snapshot_masks: np.ndarray | None = None
+        self._quick_auto_snapshot_index: int = 0
+        self._quick_auto_snapshot_label: str = ""
+        self._init_review_state()
         self._build_layout()
         self._create_menu()
         self.statusBar().showMessage("Ready")
@@ -88,6 +97,66 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         nav_layout.addWidget(self.next_btn)
         layout.addLayout(nav_layout)
 
+        review_layout = QHBoxLayout()
+        self.review_build_btn = QPushButton("Build Tracker")
+        self.review_build_btn.clicked.connect(self._review_build_tracker_from_folders)
+        self.review_open_btn = QPushButton("Open Review Tracker")
+        self.review_open_btn.clicked.connect(self._open_review_tracker)
+        self.review_prev_stack_btn = QPushButton("Prev Stack")
+        self.review_prev_stack_btn.clicked.connect(self._review_prev_stack)
+        self.review_next_stack_btn = QPushButton("Next Stack")
+        self.review_next_stack_btn.clicked.connect(self._review_next_stack)
+        self.review_filter_combo = QComboBox()
+        self.review_filter_combo.addItems(["All", "Unreviewed", "A", "B", "C"])
+        self.review_filter_combo.currentTextChanged.connect(self._review_on_filter_changed)
+        self.review_grade_combo = QComboBox()
+        self.review_grade_combo.addItems(["Unreviewed", "A", "B", "C"])
+        self.review_grade_combo.currentTextChanged.connect(self._review_on_grade_combo_changed)
+        self.review_mark_a_btn = QPushButton("Mark A")
+        self.review_mark_a_btn.clicked.connect(self._review_mark_a)
+        self.review_mark_b_btn = QPushButton("Mark B")
+        self.review_mark_b_btn.clicked.connect(self._review_mark_b)
+        self.review_mark_c_btn = QPushButton("Mark C")
+        self.review_mark_c_btn.clicked.connect(self._review_mark_c)
+        self.review_save_corrected_btn = QPushButton("Save Corrected Mask")
+        self.review_save_corrected_btn.clicked.connect(self._review_save_corrected_mask)
+        self.review_export_final_btn = QPushButton("Export Final Masks")
+        self.review_export_final_btn.clicked.connect(self._review_export_final_masks)
+        self.quick_auto_preset_combo = QComboBox()
+        self.quick_auto_preset_combo.addItem("Conservative", "conservative")
+        self.quick_auto_preset_combo.addItem("Balanced", "balanced")
+        self.quick_auto_preset_combo.addItem("Aggressive", "aggressive")
+        self.quick_auto_preset_combo.setCurrentIndex(1)
+        self.quick_auto_btn = QPushButton("Quick Auto Script")
+        self.quick_auto_btn.clicked.connect(self._run_quick_auto_script)
+        self.quick_auto_stack_btn = QPushButton("Quick Auto Stack")
+        self.quick_auto_stack_btn.clicked.connect(self._run_quick_auto_stack)
+        self.quick_auto_revert_btn = QPushButton("Revert Auto Snapshot")
+        self.quick_auto_revert_btn.clicked.connect(self._restore_quick_auto_snapshot)
+        self.quick_auto_revert_btn.setEnabled(False)
+        self.review_info_label = QLabel("Review: tracker not loaded")
+        review_layout.addWidget(self.review_build_btn)
+        review_layout.addWidget(self.review_open_btn)
+        review_layout.addWidget(self.review_prev_stack_btn)
+        review_layout.addWidget(self.review_next_stack_btn)
+        review_layout.addWidget(QLabel("Filter"))
+        review_layout.addWidget(self.review_filter_combo)
+        review_layout.addWidget(QLabel("Grade"))
+        review_layout.addWidget(self.review_grade_combo)
+        review_layout.addWidget(self.review_mark_a_btn)
+        review_layout.addWidget(self.review_mark_b_btn)
+        review_layout.addWidget(self.review_mark_c_btn)
+        review_layout.addWidget(self.review_save_corrected_btn)
+        review_layout.addWidget(self.review_export_final_btn)
+        review_layout.addWidget(QLabel("Auto Preset"))
+        review_layout.addWidget(self.quick_auto_preset_combo)
+        review_layout.addWidget(self.quick_auto_btn)
+        review_layout.addWidget(self.quick_auto_stack_btn)
+        review_layout.addWidget(self.quick_auto_revert_btn)
+        review_layout.addWidget(self.review_info_label, 1)
+        layout.addLayout(review_layout)
+        self._set_review_controls_enabled(False)
+
         layout.addWidget(self.canvas)
         # -------- Controls --------
         ctrl = QHBoxLayout()
@@ -110,6 +179,10 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         self.filter_spin = QSpinBox()
         self.filter_spin.setRange(1, 10000)
         self.filter_spin.setValue(100)
+        self.clear_prev_btn = QPushButton("Clear <= Slice")
+        self.clear_prev_btn.clicked.connect(self._clear_to_current_slice)
+        self.clear_next_btn = QPushButton("Clear >= Slice")
+        self.clear_next_btn.clicked.connect(self._clear_from_current_slice)
         mask_layout.addWidget(self.dilate_btn)
         mask_layout.addWidget(self.erode_btn)
         mask_layout.addWidget(self.close_btn)
@@ -117,6 +190,8 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         mask_layout.addWidget(self.skeleton_btn)
         mask_layout.addWidget(self.filter_btn)
         mask_layout.addWidget(self.filter_spin)
+        mask_layout.addWidget(self.clear_prev_btn)
+        mask_layout.addWidget(self.clear_next_btn)
         self.mask_vis_label = QLabel("Mask Visibility")
         self.mask_vis_slider = QSlider(Qt.Horizontal)
         self.mask_vis_slider.setRange(0, 100)
@@ -200,6 +275,12 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         ctrl.addWidget(self.info_label)
         # Label to show current cursor position and pixel value
         self.cursor_label = QLabel("")
+        cursor_width = self.cursor_label.fontMetrics().horizontalAdvance(
+            "Pos: (00000, 00000)  Value: 65535"
+        )
+        self.cursor_label.setFixedWidth(cursor_width + 16)
+        self.cursor_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        self.cursor_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         ctrl.addWidget(self.cursor_label)
         layout.addLayout(ctrl)
         self.setCentralWidget(central)
@@ -342,6 +423,15 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         # Ctrl+E is mapped to Command+E automatically on macOS, so include
         # it alongside Alt/Meta for cross-platform compatibility.
         script_act.setShortcuts(["Alt+E", "Ctrl+E", "Meta+E"])
+        quick_auto_act = tool_menu.addAction("Run Quick Auto Script")
+        quick_auto_act.triggered.connect(self._run_quick_auto_script)
+        quick_auto_act.setShortcuts(["Alt+Q"])
+        quick_auto_stack_act = tool_menu.addAction("Run Quick Auto On Stack…")
+        quick_auto_stack_act.triggered.connect(self._run_quick_auto_stack)
+        quick_auto_stack_act.setShortcuts(["Alt+W"])
+        quick_auto_revert_act = tool_menu.addAction("Revert Quick Auto Snapshot")
+        quick_auto_revert_act.triggered.connect(self._restore_quick_auto_snapshot)
+        quick_auto_revert_act.setShortcuts(["Alt+Shift+Q"])
         compare_act = tool_menu.addAction("Strategy Comparison")
         compare_act.triggered.connect(self._open_comparison_dialog)
         # Support Command+R and Option+R on macOS, and Alt+R elsewhere.
@@ -355,6 +445,33 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         # Ctrl+T is mapped to Command+T automatically on macOS, so include
         # it alongside Alt/Meta for cross-platform compatibility.
         validate_act.setShortcuts(["Alt+T", "Ctrl+T", "Meta+T"])
+
+        review_menu = self.menuBar().addMenu("Review")
+        review_build_act = review_menu.addAction("Build Tracker from Folders…")
+        review_build_act.triggered.connect(self._review_build_tracker_from_folders)
+        review_open_act = review_menu.addAction("Open Tracker…")
+        review_open_act.triggered.connect(self._open_review_tracker)
+        review_prev_act = review_menu.addAction("Previous Stack")
+        review_prev_act.triggered.connect(self._review_prev_stack)
+        review_prev_act.setShortcuts(["Alt+,"])
+        review_next_act = review_menu.addAction("Next Stack")
+        review_next_act.triggered.connect(self._review_next_stack)
+        review_next_act.setShortcuts(["Alt+."])
+        mark_a_act = review_menu.addAction("Mark A")
+        mark_a_act.triggered.connect(self._review_mark_a)
+        mark_a_act.setShortcuts(["Alt+1"])
+        mark_b_act = review_menu.addAction("Mark B")
+        mark_b_act.triggered.connect(self._review_mark_b)
+        mark_b_act.setShortcuts(["Alt+2"])
+        mark_c_act = review_menu.addAction("Mark C")
+        mark_c_act.triggered.connect(self._review_mark_c)
+        mark_c_act.setShortcuts(["Alt+3"])
+        save_corr_act = review_menu.addAction("Save Corrected Mask")
+        save_corr_act.triggered.connect(self._review_save_corrected_mask)
+        save_corr_act.setShortcuts(["Alt+Shift+S"])
+        export_final_act = review_menu.addAction("Export Final Masks")
+        export_final_act.triggered.connect(self._review_export_final_masks)
+        export_final_act.setShortcuts(["Alt+Shift+F"])
 
         help_menu = self.menuBar().addMenu("Help")
         help_act = help_menu.addAction("Shortcuts && Features")
@@ -386,7 +503,14 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
 
     def _update_view(self, reset_view: bool = False):
         self.canvas.set_image(self.model.get_current(), reset_view=reset_view)
-        mask = self.model.get_mask() if self.model.masks is not None else None
+        mask = None
+        if self.model.masks is not None:
+            try:
+                mask = self.model.get_mask()
+            except Exception:
+                # Keep UI responsive even if an external mask file has
+                # unexpected depth/shape; image display should remain usable.
+                mask = None
         self.canvas.set_mask(mask)
         self.statusBar().showMessage(
             f"Slice {self.model.index + 1} / {self.model.n_slices}")
@@ -453,6 +577,30 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
     def _handle_key(self, event):
         if not self.slider.isEnabled():
             return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_Period:
+            self._review_next_stack()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_Comma:
+            self._review_prev_stack()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_1:
+            self._review_mark_a()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_2:
+            self._review_mark_b()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_3:
+            self._review_mark_c()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_Q:
+            self._run_quick_auto_script()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_W:
+            self._run_quick_auto_stack()
+            return
+        if event.modifiers() == (Qt.AltModifier | Qt.ShiftModifier) and event.key() == Qt.Key_Q:
+            self._restore_quick_auto_snapshot()
+            return
         if event.key() in (Qt.Key_Up, Qt.Key_Left):
             self.slider.setValue(max(0, self.slider.value() - 1))
         elif event.key() in (Qt.Key_Down, Qt.Key_Right):
@@ -476,16 +624,33 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             self._redo()
         elif event.key() == Qt.Key_P:
             self.brush_enabled = not self.brush_enabled
+            self._sync_brush_cursor()
+            if self.brush_enabled:
+                mode = "Eraser" if self.brush_erase else "Brush"
+                self.statusBar().showMessage(f"{mode} ON")
+            else:
+                self.statusBar().showMessage("Brush OFF")
+        elif event.key() == Qt.Key_L:
+            if not self.brush_enabled:
+                self.brush_enabled = True
+                self.brush_erase = True
+            else:
+                self.brush_erase = not self.brush_erase
+            self._sync_brush_cursor()
             self.statusBar().showMessage(
-                "Brush ON" if self.brush_enabled else "Brush OFF")
+                "Eraser ON" if self.brush_erase else "Brush ON"
+            )
         elif event.key() == Qt.Key_H:
             self.brush_enabled = False
             self.canvas.setDragMode(self.canvas.ScrollHandDrag)
+            self._sync_brush_cursor()
             self.statusBar().showMessage("Hand tool")
         elif event.key() == Qt.Key_BracketLeft:
             self.brush_size = max(1, self.brush_size - 1)
+            self._sync_brush_cursor()
         elif event.key() == Qt.Key_BracketRight:
             self.brush_size += 1
+            self._sync_brush_cursor()
 
 
     def report_action(self, action: str, params: dict) -> None:
@@ -577,7 +742,13 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         y1 = min(mask.shape[0], y + half + 1)
         x0 = max(0, x - half)
         x1 = min(mask.shape[1], x + half + 1)
-        mask[y0:y1, x0:x1] = 1
+        yy, xx = np.ogrid[y0:y1, x0:x1]
+        radius = max(1.0, self.brush_size / 2.0)
+        circle = (yy - y) ** 2 + (xx - x) ** 2 <= radius ** 2
+        value = 0 if self.brush_erase else 1
+        patch = mask[y0:y1, x0:x1]
+        patch[circle] = value
+        mask[y0:y1, x0:x1] = patch
         self.canvas.set_mask(mask)
 
     def _start_paint(self, pos) -> None:
@@ -645,6 +816,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
     def toggle_select_mode(self) -> None:
         """Toggle the brush selection mode."""
         self.brush_enabled = not self.brush_enabled
+        self._sync_brush_cursor()
 
     def _delete_single_area(self, pos) -> None:
         """Delete the component under a clicked position."""
@@ -673,18 +845,35 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         text = (
             "Keyboard Shortcuts:\n"
             "  Arrow keys - previous/next slice\n"
+            "  Alt+, / Alt+. - previous/next review stack\n"
+            "  Alt+1 / Alt+2 / Alt+3 - mark review A/B/C\n"
+            "  Alt+Shift+F - export reviewed final masks (A/B/C)\n"
+            "  Alt+Q - run quick auto script (seed->dilate->bg->grow->bg)\n"
+            "  Alt+W - run quick auto on current stack/range\n"
+            "  Alt+Shift+Q - revert to pre-auto snapshot\n"
             "  D/E - dilate/erode current mask\n"
             "  Z/X - undo/redo\n"
             "  \u2318D or \u2325D - clear foreground on current slice\n"
             "  P - toggle brush painting\n"
+            "  L - toggle eraser mode (brush paints background)\n"
             "  [ and ] - change brush size\n"
             "  H - hand tool (panning)\n"
             "  Right click drag - delete masks touching drag rectangle\n\n"
             "Toolbar Buttons:\n"
             "  Prev/Next - move one slice backward or forward\n"
+            "  Prev Stack/Next Stack - move between raw+prediction pairs from the review tracker\n"
+            "  Build Tracker - create/refresh tracker from raw+prediction folders\n"
+            "  Review selection uses random unfinished pairs (completed pairs are excluded)\n"
+            "  Export Final Masks - build unified final mask set from reviewed items\n"
+            "  Auto Preset - choose conservative/balanced/aggressive parameters\n"
+            "  Quick Auto Script - run default cleanup pipeline on current slice\n"
+            "  Quick Auto Stack - run quick auto on all slices or a selected range\n"
+            "  Revert Auto Snapshot - restore mask state before the last auto run\n"
             "  Slider - jump to a specific slice index\n"
             "  Dilate/Erode/Skeleton - basic mask operations; Strength sets iteration count\n"
             "  Filter </spin - remove small components by pixel count\n"
+            "  Clear <= Slice - clear labels on current and all previous slices\n"
+            "  Clear >= Slice - clear labels on current and all following slices\n"
             "  Threshold Abs/Norm - threshold by value or percentage\n"
             "  Seed %/Pix % + Seed - create mask seeds above intensity percentile\n"
             "  Diff %/Hist % + Int Grow - expand mask using intensity difference and optional histogram cutoff\n"
@@ -695,9 +884,291 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
             "  Quick Save - save masks to the default path\n\n"
             "Menus provide the same actions as the toolbar.\n"
             "Zoom with mouse wheel when over the image.\n"
-            "Use Tools -> Script Editor to automate sequences of these actions"
+            "Use Tools -> Script Editor to automate sequences of these actions.\n"
+            "Use Review controls to classify stacks as A/B/C and save corrected masks.\n"
+            "Saving corrected masks marks the item as completed."
         )
         QMessageBox.information(self, "Help", text)
+
+    def _run_quick_auto_script(self) -> None:
+        if self.model.data is None:
+            QMessageBox.warning(self, "Quick Auto Script", "Please load an image first.")
+            return
+        if not self._capture_quick_auto_snapshot("single-slice quick auto"):
+            return
+        params = self._quick_auto_params_for_selected_preset()
+        metrics = self.script_quick_seed_dilate_bg_int_bg(show_status=False, **params)
+        if metrics is None:
+            return
+        self._post_quick_auto_quality_gate(metrics, context_label="current slice")
+
+    def _sync_brush_cursor(self) -> None:
+        if not self.brush_enabled:
+            self.canvas.viewport().unsetCursor()
+            self.canvas.setDragMode(self.canvas.ScrollHandDrag)
+            return
+        self.canvas.setDragMode(self.canvas.NoDrag)
+        self.canvas.viewport().setCursor(self._make_brush_cursor())
+
+    def _make_brush_cursor(self) -> QCursor:
+        radius = max(3, int(round(self.brush_size / 2.0)))
+        size = max(18, radius * 2 + 8)
+        center = size // 2
+        pix = QPixmap(size, size)
+        pix.fill(Qt.transparent)
+
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        color = QColor(255, 80, 80, 220) if self.brush_erase else QColor(0, 220, 120, 220)
+        painter.setPen(QPen(color, 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(center - radius, center - radius, radius * 2, radius * 2)
+        painter.setPen(QPen(color, 1))
+        painter.drawLine(center - 3, center, center + 3, center)
+        painter.drawLine(center, center - 3, center, center + 3)
+        painter.end()
+        return QCursor(pix, center, center)
+
+    def _run_quick_auto_stack(self) -> None:
+        if self.model.data is None:
+            QMessageBox.warning(self, "Quick Auto Stack", "Please load an image first.")
+            return
+
+        total = self.model.n_slices
+        mode, ok = QInputDialog.getItem(
+            self,
+            "Quick Auto Stack",
+            "Select run mode:",
+            ["All slices", "Slice range...", "Key slices (first/middle/last)"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        if mode == "All slices":
+            indices = list(range(total))
+        elif mode == "Slice range...":
+            start, ok = QInputDialog.getInt(
+                self, "Start Slice", f"Start slice (1-{total}):", 1, 1, total
+            )
+            if not ok:
+                return
+            end, ok = QInputDialog.getInt(
+                self, "End Slice", f"End slice ({start}-{total}):", total, start, total
+            )
+            if not ok:
+                return
+            indices = list(range(start - 1, end))
+        else:
+            indices = sorted(set([0, total // 2, total - 1]))
+
+        if not indices:
+            return
+        if not self._capture_quick_auto_snapshot("stack quick auto"):
+            return
+
+        flagged: list[int] = []
+        params = self._quick_auto_params_for_selected_preset()
+        for idx in indices:
+            self.slider.setValue(idx)
+            QApplication.processEvents()
+            metrics = self.script_quick_seed_dilate_bg_int_bg(show_status=False, **params)
+            if metrics is None:
+                continue
+            is_ok, _ = self._evaluate_quick_auto_quality(metrics)
+            if not is_ok:
+                flagged.append(idx + 1)
+
+        # Stop at the final processed slice for manual review.
+        self.slider.setValue(indices[-1])
+        QApplication.processEvents()
+
+        if flagged:
+            preview = ", ".join(str(x) for x in flagged[:15])
+            suffix = " ..." if len(flagged) > 15 else ""
+            ret = QMessageBox.question(
+                self,
+                "Quick Auto Stack Quality Gate",
+                (
+                    f"Finished {len(indices)} slice(s). "
+                    f"{len(flagged)} slice(s) exceeded quality gate:\n"
+                    f"{preview}{suffix}\n\n"
+                    "Revert all stack changes back to the pre-run snapshot?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if ret == QMessageBox.Yes:
+                self._restore_quick_auto_snapshot()
+                return
+            self.statusBar().showMessage(
+                f"Quick auto stack kept with warnings on {len(flagged)} slice(s)."
+            )
+            return
+
+        self.statusBar().showMessage(
+            f"Quick auto stack finished for {len(indices)} slice(s), no gate warnings."
+        )
+
+    def _quick_auto_params_for_selected_preset(self) -> dict[str, object]:
+        preset = self.quick_auto_preset_combo.currentData()
+        presets: dict[str, dict[str, object]] = {
+            "conservative": {
+                "seed_percentile": 94.0,
+                "seed_pixel_percent": 0.25,
+                "dilate_iterations": 1,
+                "bg1_percentile": 12.0,
+                "bg1_bins": 0,
+                "grow_diff_pct": 20.0,
+                "grow_hist_pct": 30.0,
+                "grow_force_pct": -1.0,
+                "grow_limit": 8000,
+                "bg2_percentile": 20.0,
+                "bg2_bins": 0,
+                "addition_support_percentile": 82.0,
+                "protect_small_original": True,
+                "small_component_guard": 140,
+            },
+            "aggressive": {
+                "seed_percentile": 88.0,
+                "seed_pixel_percent": 0.8,
+                "dilate_iterations": 1,
+                "bg1_percentile": 9.0,
+                "bg1_bins": 0,
+                "grow_diff_pct": 32.0,
+                "grow_hist_pct": 22.0,
+                "grow_force_pct": -1.0,
+                "grow_limit": 22000,
+                "bg2_percentile": 13.0,
+                "bg2_bins": 0,
+                "addition_support_percentile": 72.0,
+                "protect_small_original": True,
+                "small_component_guard": 110,
+            },
+            "balanced": {
+                "seed_percentile": 92.0,
+                "seed_pixel_percent": 0.45,
+                "dilate_iterations": 1,
+                "bg1_percentile": 10.0,
+                "bg1_bins": 0,
+                "grow_diff_pct": 26.0,
+                "grow_hist_pct": 28.0,
+                "grow_force_pct": -1.0,
+                "grow_limit": 14000,
+                "bg2_percentile": 16.0,
+                "bg2_bins": 0,
+                "addition_support_percentile": 78.0,
+                "protect_small_original": True,
+                "small_component_guard": 120,
+            },
+        }
+        return presets.get(preset, presets["balanced"]).copy()
+
+    def _capture_quick_auto_snapshot(self, label: str) -> bool:
+        if not self._ensure_masks():
+            return False
+        if self.model.masks is None:
+            return False
+        self._quick_auto_snapshot_masks = self.model.masks.copy()
+        self._quick_auto_snapshot_index = self.model.index
+        self._quick_auto_snapshot_label = label
+        self.quick_auto_revert_btn.setEnabled(True)
+        return True
+
+    def _restore_quick_auto_snapshot(self) -> bool:
+        if self._quick_auto_snapshot_masks is None:
+            QMessageBox.information(
+                self,
+                "Revert Auto Snapshot",
+                "No snapshot available. Run Quick Auto first.",
+            )
+            return False
+        self.model.masks = self._quick_auto_snapshot_masks.copy()
+        self.model.update_components()
+        self.model.mask_dirty = True
+        target_index = max(0, min(self.model.n_slices - 1, self._quick_auto_snapshot_index))
+        self.model.index = target_index
+        if self.slider.isEnabled():
+            self.slider.setValue(target_index)
+        self._update_view()
+        self.statusBar().showMessage(
+            f"Reverted to snapshot: {self._quick_auto_snapshot_label}"
+        )
+        return True
+
+    def _evaluate_quick_auto_quality(self, metrics: dict[str, int]) -> tuple[bool, str]:
+        before = int(metrics.get("before_pixels", 0))
+        after = int(metrics.get("after_pixels", 0))
+        area = int(self.model.get_mask().size)
+        preset = self.quick_auto_preset_combo.currentData()
+        gate_cfg = {
+            "conservative": {"max_growth_pct": 120.0, "max_area_if_empty_pct": 8.0, "max_area_pct": 35.0},
+            "balanced": {"max_growth_pct": 180.0, "max_area_if_empty_pct": 12.0, "max_area_pct": 45.0},
+            "aggressive": {"max_growth_pct": 260.0, "max_area_if_empty_pct": 18.0, "max_area_pct": 58.0},
+        }.get(preset, {"max_growth_pct": 180.0, "max_area_if_empty_pct": 12.0, "max_area_pct": 45.0})
+
+        area_pct = after * 100.0 / float(max(area, 1))
+        if area_pct > gate_cfg["max_area_pct"]:
+            return (
+                False,
+                (
+                    f"Foreground coverage too large: {area_pct:.1f}% "
+                    f"(limit {gate_cfg['max_area_pct']:.1f}%)."
+                ),
+            )
+
+        if before > 0:
+            growth_pct = (after - before) * 100.0 / float(before)
+            if growth_pct > gate_cfg["max_growth_pct"]:
+                return (
+                    False,
+                    (
+                        f"Foreground grew too much: {before} -> {after} "
+                        f"({growth_pct:.1f}% increase, limit {gate_cfg['max_growth_pct']:.1f}%)."
+                    ),
+                )
+        else:
+            filled_pct = after * 100.0 / float(max(area, 1))
+            if filled_pct > gate_cfg["max_area_if_empty_pct"]:
+                return (
+                    False,
+                    (
+                        f"Started from empty mask but filled too much area: "
+                        f"{filled_pct:.1f}% (limit {gate_cfg['max_area_if_empty_pct']:.1f}%)."
+                    ),
+                )
+        return True, "Quality gate passed."
+
+    def _post_quick_auto_quality_gate(
+        self, metrics: dict[str, int], context_label: str
+    ) -> None:
+        is_ok, message = self._evaluate_quick_auto_quality(metrics)
+        before = int(metrics.get("before_pixels", 0))
+        after = int(metrics.get("after_pixels", 0))
+        if is_ok:
+            self.statusBar().showMessage(
+                f"Quick auto done ({context_label}) | pixels {before} -> {after} | gate passed."
+            )
+            return
+
+        ret = QMessageBox.question(
+            self,
+            "Quick Auto Quality Gate",
+            (
+                f"{message}\n\n"
+                "The result may be over-expanded.\n"
+                "Revert to the pre-run snapshot?"
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if ret == QMessageBox.Yes:
+            self._restore_quick_auto_snapshot()
+            return
+        self.statusBar().showMessage(
+            f"Quick auto kept despite gate warning | pixels {before} -> {after}."
+        )
 
     def _open_script_editor(self) -> None:
         """Open the script editor window as a non-modal dialog."""
@@ -813,4 +1284,3 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin):
         if not ok:
             return
         self.script_shortest_path(y0, x0, y1, x1)
-

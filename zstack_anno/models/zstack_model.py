@@ -36,6 +36,7 @@ class ZStackModel:
         self._slice_intensity: np.ndarray | None = None
         self._seg_params: tuple[float, bool] | None = None
         self._segment_mask: np.ndarray | None = None
+        self.mask_alignment_note: str | None = None
 
     def load(self, path: str) -> None:
         """Load a stack from TIFF or CZI and reset masks."""
@@ -77,15 +78,112 @@ class ZStackModel:
         self._slice_intensity = None
         self._seg_params = None
         self._segment_mask = None
+        self.mask_alignment_note = None
 
     def load_masks(self, path: str) -> None:
         """Load mask stack from a TIFF file."""
-        self.masks = tifffile.imread(path)
+        masks = tifffile.imread(path)
+        masks = np.squeeze(masks)
+        if masks.ndim == 4:
+            masks = masks[0]
+        if masks.ndim == 2:
+            masks = masks[np.newaxis, ...]
+        if masks.ndim != 3:
+            raise ValueError(f"Mask stack must be 3-D after squeeze, got shape={masks.shape}")
+
+        # Normalize to a binary uint8 stack for stable downstream ops.
+        masks = (masks > 0).astype(np.uint8)
+
+        self.mask_alignment_note = None
+        if self.data is not None:
+            dz, dy, dx = self.data.shape
+            mz, my, mx = masks.shape
+            if (my, mx) != (dy, dx):
+                raise ValueError(
+                    f"Mask XY shape {my}x{mx} does not match image shape {dy}x{dx}"
+                )
+            if mz != dz:
+                masks = self._align_mask_depth(masks, dz)
+                self.mask_alignment_note = f"Mask depth aligned {mz}->{dz} (nearest Z mapping)."
+
+        self.masks = masks
         self.mask_path = path
         self.mask_dirty = False
         self.update_components()
 
-    def save_masks(self, path: str | None = None) -> None:
+    def resample_image_to_shape(self, target_shape: tuple[int, int, int]) -> bool:
+        """Resample loaded image stack in memory to ``target_shape`` (Z, Y, X).
+
+        This is used by review mode when prediction/annotation stacks are stored
+        at lower depth than raw stacks. Returned value indicates whether
+        resampling was actually applied.
+        """
+        if self.original_data is None:
+            raise RuntimeError("Image not loaded")
+        if len(target_shape) != 3:
+            raise ValueError(f"target_shape must be 3-D, got {target_shape}")
+        target_z, target_y, target_x = (int(v) for v in target_shape)
+        if target_z <= 0 or target_y <= 0 or target_x <= 0:
+            raise ValueError(f"Invalid target_shape: {target_shape}")
+
+        src = self.original_data
+        src_shape = tuple(int(v) for v in src.shape)
+        if src_shape == (target_z, target_y, target_x):
+            return False
+
+        zoom_factors = (
+            target_z / src_shape[0],
+            target_y / src_shape[1],
+            target_x / src_shape[2],
+        )
+        src_float = src.astype(np.float32, copy=False)
+        out = zoom(src_float, zoom_factors, order=1)
+
+        if np.issubdtype(src.dtype, np.integer):
+            info = np.iinfo(src.dtype)
+            out = np.clip(np.rint(out), info.min, info.max).astype(src.dtype)
+        else:
+            out = out.astype(src.dtype, copy=False)
+
+        self.original_data = out
+        self.data = out.copy()
+        self.index = min(self.index, out.shape[0] - 1)
+
+        # Reset masks/components for the new grid; caller should load masks next.
+        self.masks = None
+        self.components = None
+        self.mask_path = None
+        self.mask_dirty = False
+        self._slice_intensity = None
+        self._seg_params = None
+        self._segment_mask = None
+
+        # Keep physical extent by updating pixel size metadata if available.
+        sizes = self.get_pixel_sizes()
+        if sizes is not None:
+            sx, sy, sz = sizes
+            new_x = sx * src_shape[2] / target_x
+            new_y = sy * src_shape[1] / target_y
+            new_z = sz * src_shape[0] / target_z
+            self.ome_metadata = self._update_pixel_sizes(
+                self.ome_metadata, new_x, new_y, new_z
+            )
+        return True
+
+    @staticmethod
+    def _align_mask_depth(masks: np.ndarray, target_z: int) -> np.ndarray:
+        """Align mask depth to image depth via nearest-neighbor sampling on Z."""
+        if masks.ndim != 3:
+            raise ValueError("masks must be 3-D")
+        src_z = masks.shape[0]
+        if src_z == target_z:
+            return masks
+        if src_z <= 0 or target_z <= 0:
+            raise ValueError(f"Invalid depth src={src_z}, target={target_z}")
+        z_idx = np.rint(np.linspace(0, src_z - 1, target_z)).astype(np.int64)
+        return masks[z_idx]
+
+    def save_masks(self, path: str | None = None, *, metadata: dict | None = None) -> None:
         """Save current mask stack as a TIFF file."""
         if self.masks is None:
             raise RuntimeError("No masks to save")
@@ -93,7 +191,8 @@ class ZStackModel:
             if self.mask_path is None:
                 raise RuntimeError("No path specified for saving masks")
             path = self.mask_path
-        tifffile.imwrite(path, self.masks.astype(np.uint8))
+        desc = json.dumps(metadata, ensure_ascii=False) if metadata else None
+        tifffile.imwrite(path, self.masks.astype(np.uint8), description=desc)
         self.mask_path = path
         self.mask_dirty = False
 
@@ -277,7 +376,12 @@ class ZStackModel:
         """Apply histogram stretch to the processed image stack."""
         if self.original_data is None:
             raise RuntimeError("Image not loaded")
-        self.stretch_percent = percentile
+        pct = float(percentile)
+        if not np.isfinite(pct):
+            pct = 0.0
+        # Avoid degenerate ranges near/above 50%.
+        pct = min(max(pct, 0.0), 49.9)
+        self.stretch_percent = pct
         self._recompute_image()
 
     def reset_contrast(self) -> None:
@@ -428,7 +532,7 @@ class ZStackModel:
             return None
         try:
             root = ET.fromstring(self.ome_metadata)
-            pixels = root.find('.//Pixels')
+            pixels = self._find_pixels_element(root)
             if pixels is None:
                 return None
             x = float(pixels.attrib.get('PhysicalSizeX', '1'))
@@ -439,6 +543,15 @@ class ZStackModel:
             return None
 
     @staticmethod
+    def _find_pixels_element(root: ET.Element) -> ET.Element | None:
+        """Find OME Pixels element regardless of XML namespace."""
+        for elem in root.iter():
+            tag = elem.tag
+            if isinstance(tag, str) and tag.rsplit('}', 1)[-1] == 'Pixels':
+                return elem
+        return None
+
+    @staticmethod
     def _update_pixel_sizes(
         ome_xml: str | None, x: float, y: float, z: float
     ) -> str | None:
@@ -446,7 +559,7 @@ class ZStackModel:
             return None
         try:
             root = ET.fromstring(ome_xml)
-            pixels = root.find('.//Pixels')
+            pixels = ZStackModel._find_pixels_element(root)
             if pixels is not None:
                 pixels.set('PhysicalSizeX', str(x))
                 pixels.set('PhysicalSizeY', str(y))
