@@ -795,13 +795,20 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         """Delete entire components that touch the dragged rectangle."""
         if self.model.masks is None:
             return
+        self._push_undo("delete_rect")
         scene_start = self.canvas.mapToScene(start)
         scene_end = self.canvas.mapToScene(end)
         x0 = int(min(scene_start.x(), scene_end.x()))
         x1 = int(max(scene_start.x(), scene_end.x())) + 1
         y0 = int(min(scene_start.y(), scene_end.y()))
         y1 = int(max(scene_start.y(), scene_end.y())) + 1
-        self.model.delete_components_touching_rect(self.model.index, x0, y0, x1, y1)
+        changed = self.model.delete_components_touching_rect(self.model.index, x0, y0, x1, y1)
+        if not changed:
+            if self.undo_stack:
+                self.undo_stack.pop()
+            if self.history:
+                self.history.pop()
+            return
         self._update_view()
 
     # --------- additional utilities ---------
@@ -822,10 +829,17 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         """Delete the component under a clicked position."""
         if self.model.masks is None:
             return
+        self._push_undo("delete_single")
         scene_pos = self.canvas.mapToScene(pos)
         x = int(scene_pos.x())
         y = int(scene_pos.y())
-        self.model.delete_components_touching_rect(self.model.index, x, y, x + 1, y + 1)
+        changed = self.model.delete_components_touching_rect(self.model.index, x, y, x + 1, y + 1)
+        if not changed:
+            if self.undo_stack:
+                self.undo_stack.pop()
+            if self.history:
+                self.history.pop()
+            return
         self._update_view()
 
     def on_scroll(self, delta: int) -> None:

@@ -161,3 +161,35 @@ def test_toggle_reverse_intensity():
 
     model.toggle_reverse_intensity()
     assert np.array_equal(model.data, arr)
+
+
+def test_delete_components_touching_rect_reports_change():
+    model = ZStackModel()
+    model.data = np.zeros((1, 4, 4), dtype=np.uint8)
+    model.ensure_masks()
+    mask = np.array(
+        [
+            [1, 1, 0, 0],
+            [1, 1, 0, 0],
+            [0, 0, 1, 1],
+            [0, 0, 1, 1],
+        ],
+        dtype=np.uint8,
+    )
+    model.set_mask(mask, slice_idx=0)
+
+    changed = model.delete_components_touching_rect(0, 0, 0, 1, 1)
+    assert changed is True
+    expected = np.array(
+        [
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+            [0, 0, 1, 1],
+            [0, 0, 1, 1],
+        ],
+        dtype=np.uint8,
+    )
+    assert np.array_equal(model.get_mask(0), expected)
+
+    no_change = model.delete_components_touching_rect(0, 0, 0, 1, 1)
+    assert no_change is False

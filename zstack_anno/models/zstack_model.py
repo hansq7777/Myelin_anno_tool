@@ -485,10 +485,10 @@ class ZStackModel:
     # --------- utility methods ---------
     def delete_components_touching_rect(
         self, slice_idx: int, x0: int, y0: int, x1: int, y1: int
-    ) -> None:
+    ) -> bool:
         """Delete components that have any pixel within ``(x0,y0,x1,y1)``."""
         if self.masks is None:
-            return
+            return False
         if self.components is None:
             self.update_components()
         mask = self.masks[slice_idx]
@@ -497,11 +497,12 @@ class ZStackModel:
         to_del = np.unique(sub)
         to_del = to_del[to_del > 0]
         if to_del.size == 0:
-            return
+            return False
         new_mask = mask.copy()
         for lbl in to_del:
             new_mask[labels == lbl] = 0
         self.set_mask(new_mask, slice_idx)
+        return True
 
     def truncate(self, start: int, end: int) -> None:
         """Truncate the stack to ``start``-``end`` inclusive and note in OME."""
