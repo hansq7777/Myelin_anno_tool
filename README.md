@@ -21,6 +21,9 @@ On Linux you can also use:
 ./start_gui.sh
 ```
 
+Full Linux deployment and troubleshooting guide:
+`Linux_DEPLOY.md`
+
 For Linux desktop use, start it inside a GUI session (X11/Wayland). If your
 system reports missing Qt platform plugin `xcb`, install distro Qt/X11 runtime
 libs first (package names vary by distro).
