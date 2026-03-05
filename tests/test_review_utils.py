@@ -78,3 +78,11 @@ def test_build_pair_key():
         build_pair_key("sample_A01_mask.tif", is_prediction=True)
         == "sample_a01"
     )
+    assert (
+        build_pair_key("2501_60_R_M1_S00.ome_dz0p396.tif")
+        == "2501_60_r_m1_s00"
+    )
+    assert (
+        build_pair_key("2501_60_R_M1_S00.ome_pred.tif", is_prediction=True)
+        == "2501_60_r_m1_s00"
+    )

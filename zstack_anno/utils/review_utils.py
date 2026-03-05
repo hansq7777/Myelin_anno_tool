@@ -86,6 +86,12 @@ def build_pair_key(file_name: str, *, is_prediction: bool = False) -> str:
             if stem_lower.endswith(suffix):
                 stem = stem[: len(stem) - len(suffix)]
                 break
+    # Some raw/pred files append variant suffixes after ".ome" (e.g. ".ome_dz0p396",
+    # ".ome_pred"). Keep only the stable zstack id part before ".ome".
+    stem_lower = stem.lower()
+    ome_idx = stem_lower.find(".ome")
+    if ome_idx > 0:
+        stem = stem[:ome_idx]
     return stem.strip().lower()
 
 
