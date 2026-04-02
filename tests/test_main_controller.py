@@ -96,7 +96,7 @@ def _configure_quick_auto_data(controller, *, n_slices: int = 3) -> None:
     controller.history.clear()
 
 
-def test_p_brush_uses_left_add_and_right_erase(controller, app):
+def test_p_brush_and_l_eraser_apply_expected_paint_values(controller, app):
     controller.eventFilter(controller, QKeyEvent(QEvent.KeyPress, Qt.Key_P, Qt.NoModifier))
 
     pos = QPoint(10, 10)
@@ -112,17 +112,51 @@ def test_p_brush_uses_left_add_and_right_erase(controller, app):
 
     assert controller.model.get_mask(0)[10, 10] == 1
 
+    controller.eventFilter(controller, QKeyEvent(QEvent.KeyPress, Qt.Key_L, Qt.NoModifier))
     controller.eventFilter(
         controller.canvas.viewport(),
-        _mouse_event(QEvent.MouseButtonPress, pos, Qt.RightButton, Qt.RightButton),
+        _mouse_event(QEvent.MouseButtonPress, pos, Qt.LeftButton, Qt.LeftButton),
     )
     controller.eventFilter(
         controller.canvas.viewport(),
-        _mouse_event(QEvent.MouseButtonRelease, pos, Qt.RightButton, Qt.NoButton),
+        _mouse_event(QEvent.MouseButtonRelease, pos, Qt.LeftButton, Qt.NoButton),
     )
     app.processEvents()
 
     assert controller.model.get_mask(0)[10, 10] == 0
+
+
+def test_p_l_and_h_toggle_expected_tool_modes(controller):
+    assert controller._paint_tool == controller._PAINT_TOOL_HAND
+    assert controller.brush_enabled is False
+
+    controller.eventFilter(controller, QKeyEvent(QEvent.KeyPress, Qt.Key_P, Qt.NoModifier))
+    assert controller._paint_tool == controller._PAINT_TOOL_BRUSH
+    assert controller.brush_enabled is True
+
+    controller.eventFilter(controller, QKeyEvent(QEvent.KeyPress, Qt.Key_P, Qt.NoModifier))
+    assert controller._paint_tool == controller._PAINT_TOOL_HAND
+    assert controller.brush_enabled is False
+
+    controller.eventFilter(controller, QKeyEvent(QEvent.KeyPress, Qt.Key_L, Qt.NoModifier))
+    assert controller._paint_tool == controller._PAINT_TOOL_ERASER
+    assert controller.brush_enabled is True
+
+    controller.eventFilter(controller, QKeyEvent(QEvent.KeyPress, Qt.Key_P, Qt.NoModifier))
+    assert controller._paint_tool == controller._PAINT_TOOL_BRUSH
+    assert controller.brush_enabled is True
+
+    controller.eventFilter(controller, QKeyEvent(QEvent.KeyPress, Qt.Key_L, Qt.NoModifier))
+    assert controller._paint_tool == controller._PAINT_TOOL_ERASER
+    assert controller.brush_enabled is True
+
+    controller.eventFilter(controller, QKeyEvent(QEvent.KeyPress, Qt.Key_L, Qt.NoModifier))
+    assert controller._paint_tool == controller._PAINT_TOOL_HAND
+    assert controller.brush_enabled is False
+
+    controller.eventFilter(controller, QKeyEvent(QEvent.KeyPress, Qt.Key_H, Qt.NoModifier))
+    assert controller._paint_tool == controller._PAINT_TOOL_HAND
+    assert controller.brush_enabled is False
 
 
 def test_hold_d_drag_deletes_component_with_preview(controller, app):

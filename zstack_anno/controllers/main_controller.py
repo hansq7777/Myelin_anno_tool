@@ -47,6 +47,10 @@ class MainController(
     ReviewMixin,
     VolumeMixin,
 ):
+    _PAINT_TOOL_HAND = "hand"
+    _PAINT_TOOL_BRUSH = "brush"
+    _PAINT_TOOL_ERASER = "eraser"
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Z-Stack Annotation (alpha)")
@@ -57,6 +61,7 @@ class MainController(
         self.history: list[str] = []
         # Brush tool settings
         self.brush_enabled: bool = False
+        self._paint_tool: str = self._PAINT_TOOL_HAND
         self.brush_size: int = 5
         self._painting: bool = False
         self._painting_value: int | None = None
@@ -867,20 +872,25 @@ class MainController(
         elif event.key() == Qt.Key_P:
             if event.isAutoRepeat():
                 return
-            if self._painting:
-                self._end_paint()
-            self.brush_enabled = not self.brush_enabled
-            self._sync_tool_cursor()
-            self.statusBar().showMessage(
-                "Brush ON: left add, right erase" if self.brush_enabled else "Brush OFF"
-            )
+            if self._paint_tool == self._PAINT_TOOL_BRUSH:
+                self._set_paint_tool(self._PAINT_TOOL_HAND)
+                self.statusBar().showMessage("Hand tool")
+            else:
+                self._set_paint_tool(self._PAINT_TOOL_BRUSH)
+                self.statusBar().showMessage("Brush tool: paint foreground")
+        elif event.key() == Qt.Key_L:
+            if event.isAutoRepeat():
+                return
+            if self._paint_tool == self._PAINT_TOOL_ERASER:
+                self._set_paint_tool(self._PAINT_TOOL_HAND)
+                self.statusBar().showMessage("Hand tool")
+            else:
+                self._set_paint_tool(self._PAINT_TOOL_ERASER)
+                self.statusBar().showMessage("Eraser tool: erase foreground")
         elif event.key() == Qt.Key_H:
             if event.isAutoRepeat():
                 return
-            if self._painting:
-                self._end_paint()
-            self.brush_enabled = False
-            self.canvas.setDragMode(self.canvas.ScrollHandDrag)
+            self._set_paint_tool(self._PAINT_TOOL_HAND)
             self._sync_tool_cursor()
             self.statusBar().showMessage("Hand tool")
         elif event.key() == Qt.Key_BracketLeft:
@@ -897,10 +907,12 @@ class MainController(
             self._delete_hold = False
             if self._delete_drag_start is None:
                 self._sync_tool_cursor()
-                if self.brush_enabled:
-                    self.statusBar().showMessage("Brush ON: left add, right erase")
+                if self._paint_tool == self._PAINT_TOOL_BRUSH:
+                    self.statusBar().showMessage("Brush tool: paint foreground")
+                elif self._paint_tool == self._PAINT_TOOL_ERASER:
+                    self.statusBar().showMessage("Eraser tool: erase foreground")
                 else:
-                    self.statusBar().showMessage("Ready")
+                    self.statusBar().showMessage("Hand tool")
 
 
     def report_action(self, action: str, params: dict) -> None:
@@ -994,7 +1006,10 @@ class MainController(
             and event.type() in (QEvent.MouseButtonPress, QEvent.MouseMove, QEvent.MouseButtonRelease)
         ):
             if event.type() == QEvent.MouseButtonPress and event.button() in (Qt.LeftButton, Qt.RightButton):
-                self._start_paint(event.pos(), 1 if event.button() == Qt.LeftButton else 0)
+                paint_value = self._paint_value_for_tool()
+                if paint_value is None:
+                    return False
+                self._start_paint(event.pos(), paint_value)
                 return True
             if (
                 event.type() == QEvent.MouseMove
@@ -1135,9 +1150,13 @@ class MainController(
 
 
     def toggle_select_mode(self) -> None:
-        """Toggle the brush selection mode."""
-        self.brush_enabled = not self.brush_enabled
-        self._sync_tool_cursor()
+        """Toggle between the brush tool and the hand tool."""
+        next_tool = (
+            self._PAINT_TOOL_HAND
+            if self._paint_tool == self._PAINT_TOOL_BRUSH
+            else self._PAINT_TOOL_BRUSH
+        )
+        self._set_paint_tool(next_tool)
 
     def _delete_single_area(self, pos) -> None:
         """Delete the component under a clicked position."""
@@ -1175,7 +1194,8 @@ class MainController(
             "  E - erode current mask\n"
             "  Z/X - undo/redo\n"
             "  \u2318D or \u2325D - clear foreground on current slice\n"
-            "  P - toggle brush painting (left add / right erase)\n"
+            "  P - toggle brush tool (paint foreground)\n"
+            "  L - toggle eraser tool (erase foreground)\n"
             "  [ and ] - change brush size\n"
             "  H - hand tool (panning)\n"
             "  Hold D + left drag - box delete with preview\n\n"
@@ -1239,6 +1259,26 @@ class MainController(
         self.canvas.setDragMode(self.canvas.NoDrag)
         self.canvas.viewport().setCursor(self._make_brush_cursor())
 
+    def _set_paint_tool(self, tool: str) -> None:
+        if tool not in {
+            self._PAINT_TOOL_HAND,
+            self._PAINT_TOOL_BRUSH,
+            self._PAINT_TOOL_ERASER,
+        }:
+            tool = self._PAINT_TOOL_HAND
+        if self._painting:
+            self._end_paint()
+        self._paint_tool = tool
+        self.brush_enabled = tool != self._PAINT_TOOL_HAND
+        self._sync_tool_cursor()
+
+    def _paint_value_for_tool(self) -> int | None:
+        if self._paint_tool == self._PAINT_TOOL_BRUSH:
+            return 1
+        if self._paint_tool == self._PAINT_TOOL_ERASER:
+            return 0
+        return None
+
     def _make_brush_cursor(self) -> QCursor:
         radius = max(3, int(round(self.brush_size / 2.0)))
         size = max(18, radius * 2 + 8)
@@ -1248,7 +1288,10 @@ class MainController(
 
         painter = QPainter(pix)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        color = QColor(255, 80, 80, 220) if self._painting_value == 0 else QColor(0, 220, 120, 220)
+        paint_value = self._painting_value
+        if paint_value is None:
+            paint_value = self._paint_value_for_tool()
+        color = QColor(255, 80, 80, 220) if paint_value == 0 else QColor(0, 220, 120, 220)
         painter.setPen(QPen(color, 2))
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(center - radius, center - radius, radius * 2, radius * 2)
