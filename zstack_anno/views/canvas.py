@@ -3,15 +3,22 @@ from PyQt5.QtGui import QPixmap, QImage, QTransform
 from PyQt5.QtCore import Qt, pyqtSignal
 import numpy as np
 
+_ZOOM_BASE = 1.2
+_MIN_ZOOM = 0.2
+_MAX_ZOOM = 24.0
+
 
 class SliceCanvas(QGraphicsView):
     """负责把 2-D ndarray 显示为灰度图，可拖拽缩放，并支持掩膜叠加。"""
+    zoomAdjusted = pyqtSignal(float)
 
     def __init__(self) -> None:
         super().__init__()
         self.setScene(QGraphicsScene())
         # 启用拖拽平移
         self.setDragMode(self.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
         # 启用鼠标移动追踪以显示像素信息
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
@@ -50,14 +57,31 @@ class SliceCanvas(QGraphicsView):
             self._zoom = 1.0
             self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
 
+    def zoom_factor(self) -> float:
+        return float(self._zoom)
+
+    def apply_zoom_factor(self, factor: float, *, emit_signal: bool = False) -> float:
+        factor = float(factor)
+        if factor <= 0.0:
+            return float(self._zoom)
+        new_zoom = float(np.clip(self._zoom * factor, _MIN_ZOOM, _MAX_ZOOM))
+        applied = new_zoom / max(self._zoom, 1e-9)
+        if abs(applied - 1.0) < 1e-6:
+            return float(self._zoom)
+        self._zoom = new_zoom
+        self.scale(applied, applied)
+        if emit_signal:
+            self.zoomAdjusted.emit(applied)
+        return float(self._zoom)
+
     def wheelEvent(self, event):
         angle = event.angleDelta().y()
         if angle == 0:
             return
-        # Use a smaller scaling factor for smoother zooming
-        factor = 1.02 if angle > 0 else 0.98
-        self._zoom *= factor
-        self.scale(factor, factor)
+        steps = float(angle) / 120.0
+        factor = _ZOOM_BASE ** steps
+        self.apply_zoom_factor(factor, emit_signal=True)
+        event.accept()
 
     def set_mask_opacity(self, opacity: float) -> None:
         """Set mask opacity as a fraction from 0 to 1."""
@@ -137,4 +161,3 @@ class SyncCanvas(SliceCanvas):
         self.horizontalScrollBar().setValue(h)
         self.verticalScrollBar().setValue(v)
         self._ignore = False
-

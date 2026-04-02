@@ -34,7 +34,7 @@ from ..utils.dialogs import question_with_shortcuts
 from ..utils import config
 from .file_helper import FileOpsMixin
 from .morphology_helper import MorphologyMixin, IntGrowThread, FilterSmall3DThread
-from .script_helper import ScriptMixin
+from .script_helper import ScriptMixin, QuickAutoThread
 from .review_helper import ReviewMixin
 from .volume_helper import VolumeMixin
 
@@ -71,9 +71,18 @@ class MainController(
         self._active_filter_request_id: int | None = None
         self._pending_filter_undo_mask: np.ndarray | None = None
         self.script_editor: ScriptEditor | None = None
+        self.quick_auto_cancel_event = threading.Event()
+        self.quick_auto_thread: QuickAutoThread | None = None
+        self._quick_auto_request_seq: int = 0
+        self._active_quick_auto_request_id: int | None = None
+        self._active_quick_auto_mode: str | None = None
+        self._pending_quick_auto_undo_mask: np.ndarray | None = None
         self._quick_auto_snapshot_masks: np.ndarray | None = None
         self._quick_auto_snapshot_index: int = 0
         self._quick_auto_snapshot_label: str = ""
+        self._pending_quick_auto_snapshot_masks: np.ndarray | None = None
+        self._pending_quick_auto_snapshot_index: int = 0
+        self._pending_quick_auto_snapshot_label: str = ""
         self._init_review_state()
         self._build_layout()
         self._create_menu()
@@ -87,6 +96,7 @@ class MainController(
         # Capture key events from child widgets
         self.installEventFilter(self)
         self.canvas.installEventFilter(self)
+        self.canvas.zoomAdjusted.connect(self._sync_inline_zoom_from_canvas)
         # Also filter events from the canvas viewport for painting
         self.canvas.viewport().installEventFilter(self)
         self.slider.installEventFilter(self)
@@ -99,6 +109,7 @@ class MainController(
         )
         self._delete_band.hide()
         self._inline_volume_enabled = False
+        self.inline_volume_preview.zoomAdjusted.connect(self._sync_canvas_zoom_from_inline)
         self._inline_preview_timer = QTimer(self)
         self._inline_preview_timer.setSingleShot(True)
         self._inline_preview_timer.timeout.connect(self._refresh_inline_volume_preview)
@@ -127,6 +138,7 @@ class MainController(
         self.inline_view_combo = QComboBox()
         for mode, label in VIEW_MODE_LABELS:
             self.inline_view_combo.addItem(label, mode)
+        self.inline_view_combo.setCurrentIndex(1)
         self.inline_view_combo.currentIndexChanged.connect(self._on_inline_view_changed)
         self.inline_view_combo.setEnabled(False)
         nav_layout.addWidget(self.prev_btn)
@@ -170,6 +182,9 @@ class MainController(
         self.quick_auto_btn.clicked.connect(self._run_quick_auto_script)
         self.quick_auto_stack_btn = QPushButton("Quick Auto Stack")
         self.quick_auto_stack_btn.clicked.connect(self._run_quick_auto_stack)
+        self.quick_auto_cancel_btn = QPushButton("Cancel Auto")
+        self.quick_auto_cancel_btn.clicked.connect(self._cancel_quick_auto)
+        self.quick_auto_cancel_btn.setEnabled(False)
         self.quick_auto_revert_btn = QPushButton("Revert Auto Snapshot")
         self.quick_auto_revert_btn.clicked.connect(self._restore_quick_auto_snapshot)
         self.quick_auto_revert_btn.setEnabled(False)
@@ -191,6 +206,7 @@ class MainController(
         review_layout.addWidget(self.quick_auto_preset_combo)
         review_layout.addWidget(self.quick_auto_btn)
         review_layout.addWidget(self.quick_auto_stack_btn)
+        review_layout.addWidget(self.quick_auto_cancel_btn)
         review_layout.addWidget(self.quick_auto_revert_btn)
         review_layout.addWidget(self.review_info_label, 1)
         layout.addLayout(review_layout)
@@ -471,15 +487,20 @@ class MainController(
         # Ctrl+E is mapped to Command+E automatically on macOS, so include
         # it alongside Alt/Meta for cross-platform compatibility.
         script_act.setShortcuts(["Alt+E", "Ctrl+E", "Meta+E"])
-        quick_auto_act = tool_menu.addAction("Run Quick Auto Script")
-        quick_auto_act.triggered.connect(self._run_quick_auto_script)
-        quick_auto_act.setShortcuts(["Alt+Q"])
-        quick_auto_stack_act = tool_menu.addAction("Run Quick Auto On Stack…")
-        quick_auto_stack_act.triggered.connect(self._run_quick_auto_stack)
-        quick_auto_stack_act.setShortcuts(["Alt+W"])
-        quick_auto_revert_act = tool_menu.addAction("Revert Quick Auto Snapshot")
-        quick_auto_revert_act.triggered.connect(self._restore_quick_auto_snapshot)
-        quick_auto_revert_act.setShortcuts(["Alt+Shift+Q"])
+        self.quick_auto_act = tool_menu.addAction("Run Quick Auto Script")
+        self.quick_auto_act.triggered.connect(self._run_quick_auto_script)
+        self.quick_auto_act.setShortcuts(["Alt+Q"])
+        self.quick_auto_stack_act = tool_menu.addAction("Run Quick Auto On Stack…")
+        self.quick_auto_stack_act.triggered.connect(self._run_quick_auto_stack)
+        self.quick_auto_stack_act.setShortcuts(["Alt+W"])
+        self.quick_auto_cancel_act = tool_menu.addAction("Cancel Quick Auto")
+        self.quick_auto_cancel_act.triggered.connect(self._cancel_quick_auto)
+        self.quick_auto_cancel_act.setShortcuts(["Alt+Shift+W"])
+        self.quick_auto_cancel_act.setEnabled(False)
+        self.quick_auto_revert_act = tool_menu.addAction("Revert Quick Auto Snapshot")
+        self.quick_auto_revert_act.triggered.connect(self._restore_quick_auto_snapshot)
+        self.quick_auto_revert_act.setShortcuts(["Alt+Shift+Q"])
+        self.quick_auto_revert_act.setEnabled(False)
         compare_act = tool_menu.addAction("Strategy Comparison")
         compare_act.triggered.connect(self._open_comparison_dialog)
         # Support Command+R and Option+R on macOS, and Alt+R elsewhere.
@@ -627,6 +648,14 @@ class MainController(
     def _current_spacing_xyz(self) -> tuple[float, float, float]:
         return self.model.get_pixel_sizes() or (1.0, 1.0, 1.0)
 
+    def _sync_inline_zoom_from_canvas(self, factor: float) -> None:
+        if not getattr(self, "_inline_volume_enabled", False):
+            return
+        self.inline_volume_preview.apply_zoom_factor(float(factor), emit_signal=False)
+
+    def _sync_canvas_zoom_from_inline(self, factor: float) -> None:
+        self.canvas.apply_zoom_factor(float(factor), emit_signal=False)
+
     def _refresh_inline_volume_preview(self) -> None:
         if not getattr(self, "_inline_volume_enabled", False):
             return
@@ -635,7 +664,7 @@ class MainController(
             self.inline_volume_preview.clear_preview()
             self._inline_preview_volume_signature = None
             return
-        view_mode = self.inline_view_combo.currentData() or "oblique"
+        view_mode = self.inline_view_combo.currentData() or "xy"
         spacing = self._current_spacing_xyz()
         volume_signature = (
             int(self.model.image_revision),
@@ -1088,6 +1117,7 @@ class MainController(
             "  Auto Preset - choose conservative/balanced/aggressive parameters\n"
             "  Quick Auto Script - run default cleanup pipeline on current slice\n"
             "  Quick Auto Stack - run quick auto on all slices or a selected range\n"
+            "  Cancel Auto - cancel the current background quick auto run\n"
             "  Revert Auto Snapshot - restore mask state before the last auto run\n"
             "  Slider - jump to a specific slice index\n"
             "  Dilate/Erode/Skeleton - basic mask operations; Strength sets iteration count\n"
@@ -1105,7 +1135,7 @@ class MainController(
             "Menus provide the same actions as the toolbar.\n"
             "Zoom with mouse wheel when over the image.\n"
             "Use Tools -> Script Editor to automate sequences of these actions.\n"
-            "Use Tools -> 3D Inspector to render raw stacks and prediction masks as an oblique 3D view.\n"
+            "Use Tools -> 3D Inspector to render raw stacks and prediction masks as a 3D view.\n"
             "Use Review controls to classify stacks as A/B/C and save corrected masks.\n"
             "Saving corrected masks marks the item as completed."
         )
@@ -1115,17 +1145,15 @@ class MainController(
         if self.model.data is None:
             QMessageBox.warning(self, "Quick Auto Script", "Please load an image first.")
             return
-        if not self._capture_quick_auto_snapshot("single-slice quick auto"):
+        if self._quick_auto_is_running():
+            self.statusBar().showMessage("Quick auto is already running in background.")
             return
-        params = self._quick_auto_params_for_selected_preset()
-        metrics = self.script_quick_seed_dilate_bg_int_bg(
-            show_status=False,
-            push_undo=True,
-            **params,
+        self._start_quick_auto_job(
+            mode="single",
+            indices=[self.model.index],
+            label="single-slice quick auto",
+            params=self._quick_auto_params_for_selected_preset(),
         )
-        if metrics is None:
-            return
-        self._post_quick_auto_quality_gate(metrics, context_label="current slice")
 
     def _sync_tool_cursor(self) -> None:
         if self._delete_tool_active():
@@ -1179,6 +1207,9 @@ class MainController(
         if self.model.data is None:
             QMessageBox.warning(self, "Quick Auto Stack", "Please load an image first.")
             return
+        if self._quick_auto_is_running():
+            self.statusBar().showMessage("Quick auto is already running in background.")
+            return
 
         total = self.model.n_slices
         mode, ok = QInputDialog.getItem(
@@ -1211,50 +1242,11 @@ class MainController(
 
         if not indices:
             return
-        if not self._capture_quick_auto_snapshot("stack quick auto"):
-            return
-
-        flagged: list[int] = []
-        params = self._quick_auto_params_for_selected_preset()
-        for idx in indices:
-            self.slider.setValue(idx)
-            QApplication.processEvents()
-            metrics = self.script_quick_seed_dilate_bg_int_bg(show_status=False, **params)
-            if metrics is None:
-                continue
-            is_ok, _ = self._evaluate_quick_auto_quality(metrics)
-            if not is_ok:
-                flagged.append(idx + 1)
-
-        # Stop at the final processed slice for manual review.
-        self.slider.setValue(indices[-1])
-        QApplication.processEvents()
-
-        if flagged:
-            preview = ", ".join(str(x) for x in flagged[:15])
-            suffix = " ..." if len(flagged) > 15 else ""
-            ret = QMessageBox.question(
-                self,
-                "Quick Auto Stack Quality Gate",
-                (
-                    f"Finished {len(indices)} slice(s). "
-                    f"{len(flagged)} slice(s) exceeded quality gate:\n"
-                    f"{preview}{suffix}\n\n"
-                    "Revert all stack changes back to the pre-run snapshot?"
-                ),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
-            )
-            if ret == QMessageBox.Yes:
-                self._restore_quick_auto_snapshot()
-                return
-            self.statusBar().showMessage(
-                f"Quick auto stack kept with warnings on {len(flagged)} slice(s)."
-            )
-            return
-
-        self.statusBar().showMessage(
-            f"Quick auto stack finished for {len(indices)} slice(s), no gate warnings."
+        self._start_quick_auto_job(
+            mode="stack",
+            indices=indices,
+            label="stack quick auto",
+            params=self._quick_auto_params_for_selected_preset(),
         )
 
     def _quick_auto_params_for_selected_preset(self) -> dict[str, object]:
@@ -1311,18 +1303,243 @@ class MainController(
         }
         return presets.get(preset, presets["balanced"]).copy()
 
-    def _capture_quick_auto_snapshot(self, label: str) -> bool:
+    def _quick_auto_is_running(self) -> bool:
+        return self.quick_auto_thread is not None and self.quick_auto_thread.isRunning()
+
+    def _set_quick_auto_busy(self, busy: bool) -> None:
+        if hasattr(self, "quick_auto_preset_combo"):
+            self.quick_auto_preset_combo.setEnabled(not busy)
+        if hasattr(self, "quick_auto_btn"):
+            self.quick_auto_btn.setEnabled(not busy)
+        if hasattr(self, "quick_auto_stack_btn"):
+            self.quick_auto_stack_btn.setEnabled(not busy)
+        if hasattr(self, "quick_auto_cancel_btn"):
+            self.quick_auto_cancel_btn.setEnabled(busy and not self.quick_auto_cancel_event.is_set())
+        if hasattr(self, "quick_auto_revert_btn"):
+            self.quick_auto_revert_btn.setEnabled((not busy) and self._quick_auto_snapshot_masks is not None)
+        for name in (
+            "quick_auto_act",
+            "quick_auto_stack_act",
+            "quick_auto_revert_act",
+        ):
+            action = getattr(self, name, None)
+            if action is not None:
+                action.setEnabled(not busy)
+        action = getattr(self, "quick_auto_cancel_act", None)
+        if action is not None:
+            action.setEnabled(busy and not self.quick_auto_cancel_event.is_set())
+
+    def _stage_quick_auto_snapshot(self, label: str) -> bool:
         if not self._ensure_masks():
             return False
         if self.model.masks is None:
             return False
-        self._quick_auto_snapshot_masks = self.model.masks.copy()
-        self._quick_auto_snapshot_index = self.model.index
-        self._quick_auto_snapshot_label = label
-        self.quick_auto_revert_btn.setEnabled(True)
+        self._pending_quick_auto_snapshot_masks = self.model.masks.copy()
+        self._pending_quick_auto_snapshot_index = self.model.index
+        self._pending_quick_auto_snapshot_label = label
         return True
 
+    def _clear_staged_quick_auto_snapshot(self) -> None:
+        self._pending_quick_auto_snapshot_masks = None
+        self._pending_quick_auto_snapshot_index = 0
+        self._pending_quick_auto_snapshot_label = ""
+
+    def _commit_staged_quick_auto_snapshot(self) -> None:
+        if self._pending_quick_auto_snapshot_masks is None:
+            return
+        self._quick_auto_snapshot_masks = self._pending_quick_auto_snapshot_masks
+        self._quick_auto_snapshot_index = self._pending_quick_auto_snapshot_index
+        self._quick_auto_snapshot_label = self._pending_quick_auto_snapshot_label
+        self._clear_staged_quick_auto_snapshot()
+
+    def _cleanup_quick_auto_thread(self) -> None:
+        self.quick_auto_thread = None
+        self._active_quick_auto_request_id = None
+        self._active_quick_auto_mode = None
+        self._pending_quick_auto_undo_mask = None
+        self.quick_auto_cancel_event.clear()
+        self._set_quick_auto_busy(False)
+
+    def _start_quick_auto_job(
+        self,
+        *,
+        mode: str,
+        indices: list[int],
+        label: str,
+        params: dict[str, object],
+    ) -> bool:
+        if self._quick_auto_is_running():
+            return False
+        if not indices:
+            return False
+        if not self._stage_quick_auto_snapshot(label):
+            return False
+        if self.model.data is None or self.model.masks is None:
+            self._clear_staged_quick_auto_snapshot()
+            return False
+        request_id = int(self._quick_auto_request_seq) + 1
+        self._quick_auto_request_seq = request_id
+        self._active_quick_auto_request_id = request_id
+        self._active_quick_auto_mode = mode
+        self._pending_quick_auto_undo_mask = (
+            self.model.masks.copy() if mode == "single" else None
+        )
+        self.quick_auto_cancel_event.clear()
+        thread = QuickAutoThread(
+            data_stack=np.array(self.model.data, copy=True, order="C"),
+            mask_stack=np.array(self.model.masks, copy=True, order="C"),
+            params=params,
+            request_id=request_id,
+            image_revision=int(self.model.image_revision),
+            mask_revision=int(self.model.mask_revision),
+            mode=mode,
+            indices=indices,
+            cancel_event=self.quick_auto_cancel_event,
+        )
+        thread.finished.connect(thread.deleteLater)
+        thread.succeeded.connect(self._quick_auto_finished)
+        thread.failed.connect(self._quick_auto_failed)
+        thread.cancelled.connect(self._quick_auto_cancelled)
+        thread.progress.connect(self._quick_auto_progress)
+        self.quick_auto_thread = thread
+        self._set_quick_auto_busy(True)
+        if mode == "stack":
+            self.statusBar().showMessage(
+                f"Quick auto stack running in background for {len(indices)} slice(s)..."
+            )
+        else:
+            self.statusBar().showMessage(
+                f"Quick auto running in background for slice {indices[0] + 1}..."
+            )
+        thread.start()
+        return True
+
+    def _cancel_quick_auto(self) -> None:
+        if not self._quick_auto_is_running():
+            self.statusBar().showMessage("No quick auto run is active.")
+            return
+        if self.quick_auto_cancel_event.is_set():
+            return
+        self.quick_auto_cancel_event.set()
+        self._set_quick_auto_busy(True)
+        label = "stack" if self._active_quick_auto_mode == "stack" else "current slice"
+        self.statusBar().showMessage(f"Cancelling quick auto for {label}...")
+
+    def _quick_auto_progress(self, payload: dict) -> None:
+        request_id = int(payload.get("request_id", -1))
+        if request_id != getattr(self, "_active_quick_auto_request_id", None):
+            return
+        processed = int(payload.get("processed", 0))
+        total = int(payload.get("total", 0))
+        slice_index = int(payload.get("slice_index", -1))
+        self.statusBar().showMessage(
+            f"Quick auto stack running in background... {processed}/{total} slice(s) "
+            f"(latest slice {slice_index + 1})."
+        )
+
+    def _quick_auto_cancelled(self, payload: dict) -> None:
+        try:
+            request_id = int(payload.get("request_id", -1))
+            if request_id != getattr(self, "_active_quick_auto_request_id", None):
+                return
+            self._clear_staged_quick_auto_snapshot()
+            processed = int(payload.get("processed", 0))
+            total = int(payload.get("total", 0))
+            mode = str(payload.get("mode", "single"))
+            elapsed = float(payload.get("elapsed_sec", 0.0))
+            if mode == "stack":
+                self.statusBar().showMessage(
+                    f"Quick auto stack cancelled after {processed}/{total} slice(s) in {elapsed:.2f}s. "
+                    "No changes were applied."
+                )
+            else:
+                self.statusBar().showMessage(
+                    f"Quick auto cancelled in {elapsed:.2f}s. No changes were applied."
+                )
+        finally:
+            self._cleanup_quick_auto_thread()
+
+    def _quick_auto_failed(self, payload: dict) -> None:
+        try:
+            request_id = int(payload.get("request_id", -1))
+            if request_id != getattr(self, "_active_quick_auto_request_id", None):
+                return
+            self._clear_staged_quick_auto_snapshot()
+            error = str(payload.get("error", "unknown error"))
+            self.statusBar().showMessage(f"Quick auto failed: {error}")
+        finally:
+            self._cleanup_quick_auto_thread()
+
+    def _quick_auto_finished(self, payload: dict) -> None:
+        try:
+            request_id = int(payload.get("request_id", -1))
+            if request_id != getattr(self, "_active_quick_auto_request_id", None):
+                return
+            if (
+                int(self.model.image_revision) != int(payload.get("image_revision", -1))
+                or int(self.model.mask_revision) != int(payload.get("mask_revision", -1))
+            ):
+                self._clear_staged_quick_auto_snapshot()
+                self.statusBar().showMessage(
+                    "Quick auto result discarded: image or mask changed while background quick auto was running."
+                )
+                return
+            mode = str(payload.get("mode", "single"))
+            if mode == "stack":
+                self._apply_quick_auto_stack_result(payload)
+            else:
+                self._apply_quick_auto_single_result(payload)
+        finally:
+            self._cleanup_quick_auto_thread()
+
+    def _apply_quick_auto_single_result(self, payload: dict) -> None:
+        slice_index = int(payload.get("slice_index", self.model.index))
+        result_mask = np.asarray(payload.get("mask"), dtype=np.uint8)
+        metrics = {
+            "before_pixels": int(payload.get("before_pixels", 0)),
+            "after_pixels": int(payload.get("after_pixels", 0)),
+            "changed": bool(payload.get("changed", False)),
+        }
+        if metrics["changed"]:
+            if self._pending_quick_auto_undo_mask is not None:
+                self._push_undo("quick_auto", mask=self._pending_quick_auto_undo_mask)
+            self.model.set_mask(result_mask, slice_idx=slice_index)
+            self._commit_staged_quick_auto_snapshot()
+        else:
+            self._clear_staged_quick_auto_snapshot()
+        self._update_view()
+        self._post_quick_auto_quality_gate(
+            metrics,
+            context_label=f"slice {slice_index + 1}",
+            elapsed_sec=float(payload.get("elapsed_sec", 0.0)),
+        )
+
+    def _apply_quick_auto_stack_result(self, payload: dict) -> None:
+        masks = np.asarray(payload.get("masks"), dtype=np.uint8)
+        indices = [int(idx) for idx in payload.get("indices", [])]
+        metrics_by_slice = list(payload.get("metrics_by_slice", []))
+        changed = bool(payload.get("changed", False))
+        self.model.replace_masks(masks, dirty=True)
+        if indices:
+            target_index = max(0, min(self.model.n_slices - 1, indices[-1]))
+            self.model.index = target_index
+            if self.slider.isEnabled():
+                self.slider.setValue(target_index)
+        self._update_view()
+        if changed:
+            self._commit_staged_quick_auto_snapshot()
+        else:
+            self._clear_staged_quick_auto_snapshot()
+        self._post_quick_auto_stack_quality_gate(
+            metrics_by_slice,
+            indices,
+            elapsed_sec=float(payload.get("elapsed_sec", 0.0)),
+        )
+
     def _restore_quick_auto_snapshot(self) -> bool:
+        if self._quick_auto_is_running():
+            self.statusBar().showMessage("Cancel the active quick auto run before reverting.")
+            return False
         if self._quick_auto_snapshot_masks is None:
             QMessageBox.information(
                 self,
@@ -1385,14 +1602,18 @@ class MainController(
         return True, "Quality gate passed."
 
     def _post_quick_auto_quality_gate(
-        self, metrics: dict[str, int], context_label: str
+        self,
+        metrics: dict[str, int],
+        context_label: str,
+        elapsed_sec: float | None = None,
     ) -> None:
         is_ok, message = self._evaluate_quick_auto_quality(metrics)
         before = int(metrics.get("before_pixels", 0))
         after = int(metrics.get("after_pixels", 0))
+        elapsed_text = "" if elapsed_sec is None else f" in {elapsed_sec:.2f}s"
         if is_ok:
             self.statusBar().showMessage(
-                f"Quick auto done ({context_label}) | pixels {before} -> {after} | gate passed."
+                f"Quick auto done ({context_label}){elapsed_text} | pixels {before} -> {after} | gate passed."
             )
             return
 
@@ -1411,7 +1632,53 @@ class MainController(
             self._restore_quick_auto_snapshot()
             return
         self.statusBar().showMessage(
-            f"Quick auto kept despite gate warning | pixels {before} -> {after}."
+            f"Quick auto kept despite gate warning{elapsed_text} | pixels {before} -> {after}."
+        )
+
+    def _post_quick_auto_stack_quality_gate(
+        self,
+        metrics_by_slice: list[dict[str, object]],
+        indices: list[int],
+        *,
+        elapsed_sec: float | None = None,
+    ) -> None:
+        flagged: list[int] = []
+        for metrics in metrics_by_slice:
+            eval_metrics = {
+                "before_pixels": int(metrics.get("before_pixels", 0)),
+                "after_pixels": int(metrics.get("after_pixels", 0)),
+                "changed": bool(metrics.get("changed", False)),
+            }
+            is_ok, _message = self._evaluate_quick_auto_quality(eval_metrics)
+            if not is_ok:
+                flagged.append(int(metrics.get("slice_index", -1)) + 1)
+        elapsed_text = "" if elapsed_sec is None else f" in {elapsed_sec:.2f}s"
+        if flagged:
+            preview = ", ".join(str(x) for x in flagged[:15])
+            suffix = " ..." if len(flagged) > 15 else ""
+            ret = QMessageBox.question(
+                self,
+                "Quick Auto Stack Quality Gate",
+                (
+                    f"Finished {len(indices)} slice(s){elapsed_text}. "
+                    f"{len(flagged)} slice(s) exceeded quality gate:\n"
+                    f"{preview}{suffix}\n\n"
+                    "Revert all stack changes back to the pre-run snapshot?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if ret == QMessageBox.Yes:
+                self._restore_quick_auto_snapshot()
+                return
+            self.statusBar().showMessage(
+                f"Quick auto stack kept with warnings on {len(flagged)} slice(s){elapsed_text}."
+            )
+            return
+        changed_count = sum(1 for metrics in metrics_by_slice if bool(metrics.get("changed")))
+        self.statusBar().showMessage(
+            f"Quick auto stack finished for {len(indices)} slice(s){elapsed_text}; "
+            f"{changed_count} slice(s) changed and no gate warnings."
         )
 
     def _open_script_editor(self) -> None:

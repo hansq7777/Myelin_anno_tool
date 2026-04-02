@@ -18,6 +18,9 @@ _MAX_VOXELS = 900_000
 _TARGET_SHAPE_ZYX = (64, 128, 128)
 _ROTATION_SENSITIVITY_DEG = 0.55
 _MAX_PITCH_OFFSET_DEG = 82.0
+_MIN_VIEW_ZOOM = 1.0
+_MAX_VIEW_ZOOM = 6.0
+_WHEEL_ZOOM_FACTOR = 1.14
 VIEW_MODE_LABELS = (
     ("oblique", "Oblique"),
     ("xy", "XY"),
@@ -78,6 +81,7 @@ class _PreviewPrepareThread(QThread):
 
 class InlineVolumePreview(QWidget):
     """Lightweight interactive 3-D preview for the current stack."""
+    zoomAdjusted = pyqtSignal(float)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -89,7 +93,7 @@ class InlineVolumePreview(QWidget):
         self._prepared_data: _PreparedPreviewData | None = None
         self._locator_xyz: tuple[float, float, float] | None = None
         self._current_slice_z: float | None = None
-        self._view_mode = "oblique"
+        self._view_mode = "xy"
         self._status_text = "Enable 3D visualization to render a lightweight preview."
         self._volume_key: object | None = None
         self._raw_zyx: np.ndarray | None = None
@@ -107,6 +111,9 @@ class InlineVolumePreview(QWidget):
         self._drag_active = False
         self._drag_last_pos: QPoint | None = None
         self._pending_render_interactive = False
+        self._view_zoom = 1.0
+        self._view_center_norm = np.array([0.5, 0.5], dtype=np.float32)
+        self._display_volume_identity: object | None = None
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._render_pending_preview)
@@ -129,6 +136,9 @@ class InlineVolumePreview(QWidget):
         self._pitch_offset_deg = 0.0
         self._drag_active = False
         self._drag_last_pos = None
+        self._view_zoom = 1.0
+        self._view_center_norm = np.array([0.5, 0.5], dtype=np.float32)
+        self._display_volume_identity = None
         self._render_timer.stop()
         self.unsetCursor()
         self._status_text = "Enable 3D visualization to render a lightweight preview."
@@ -156,6 +166,41 @@ class InlineVolumePreview(QWidget):
     def rotation_offsets(self) -> tuple[float, float]:
         return float(self._yaw_offset_deg), float(self._pitch_offset_deg)
 
+    def zoom_factor(self) -> float:
+        return float(self._view_zoom)
+
+    def apply_zoom_factor(
+        self,
+        factor: float,
+        *,
+        anchor_norm: tuple[float, float] | None = None,
+        emit_signal: bool = False,
+    ) -> float:
+        factor = float(factor)
+        if factor <= 0.0:
+            return float(self._view_zoom)
+        old_zoom = float(self._view_zoom)
+        new_zoom = float(np.clip(old_zoom * factor, _MIN_VIEW_ZOOM, _MAX_VIEW_ZOOM))
+        if abs(new_zoom - old_zoom) < 1e-6:
+            return float(self._view_zoom)
+        if anchor_norm is None:
+            anchor = np.array([0.5, 0.5], dtype=np.float32)
+        else:
+            anchor = np.clip(np.asarray(anchor_norm, dtype=np.float32), 0.0, 1.0)
+        center = np.asarray(self._view_center_norm, dtype=np.float32)
+        offset = (anchor - center) / max(old_zoom, 1e-6)
+        self._view_zoom = new_zoom
+        self._view_center_norm = anchor - offset * new_zoom
+        self._clamp_view_center()
+        self._status_text = (
+            f"{_view_mode_label(self._view_mode)} view | wheel zoom {self._view_zoom:.2f}x | "
+            "left-drag rotate | G reset."
+        )
+        self.update()
+        if emit_signal:
+            self.zoomAdjusted.emit(new_zoom / max(old_zoom, 1e-9))
+        return float(self._view_zoom)
+
     def reset_view_rotation(self) -> None:
         self._yaw_offset_deg = 0.0
         self._pitch_offset_deg = 0.0
@@ -182,6 +227,15 @@ class InlineVolumePreview(QWidget):
         if raw_zyx is None:
             self.clear_preview()
             return
+        display_identity = (
+            int(id(raw_zyx)),
+            tuple(int(v) for v in np.asarray(raw_zyx).shape),
+            tuple(float(v) for v in spacing_xyz),
+        )
+        if display_identity != self._display_volume_identity:
+            self._view_zoom = 1.0
+            self._view_center_norm = np.array([0.5, 0.5], dtype=np.float32)
+            self._display_volume_identity = display_identity
         self._raw_zyx = np.asarray(raw_zyx)
         self._mask_zyx = None if mask_zyx is None else np.asarray(mask_zyx)
         self._spacing_xyz = tuple(float(v) for v in spacing_xyz)
@@ -209,14 +263,18 @@ class InlineVolumePreview(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.fillRect(self.rect(), QColor(248, 247, 243))
 
-        target = self._content_rect()
+        viewport = self._content_rect()
+        target = self._image_target_rect(viewport)
         if self._base_image is not None and self._projection is not None:
+            painter.save()
+            painter.setClipRect(viewport)
             painter.drawImage(target, self._base_image)
             self._draw_slice_plane(painter, target)
             self._draw_locator(painter, target)
+            painter.restore()
         else:
             painter.setPen(QColor(90, 90, 90))
-            painter.drawText(target, Qt.AlignCenter | Qt.TextWordWrap, self._status_text)
+            painter.drawText(viewport, Qt.AlignCenter | Qt.TextWordWrap, self._status_text)
 
         painter.setPen(QColor(95, 95, 95))
         painter.drawText(
@@ -265,6 +323,28 @@ class InlineVolumePreview(QWidget):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def wheelEvent(self, event) -> None:
+        if self._base_image is None or self._projection is None:
+            super().wheelEvent(event)
+            return
+        viewport = self._content_rect()
+        pos = QPointF(event.position()) if hasattr(event, "position") else QPointF(event.pos())
+        if not viewport.contains(pos):
+            super().wheelEvent(event)
+            return
+        angle = event.angleDelta().y()
+        if angle == 0:
+            event.accept()
+            return
+        factor = _WHEEL_ZOOM_FACTOR if angle > 0 else (1.0 / _WHEEL_ZOOM_FACTOR)
+        old_target = self._image_target_rect(viewport)
+        anchor_norm = (
+            (pos.x() - old_target.left()) / max(old_target.width(), 1e-6),
+            (pos.y() - old_target.top()) / max(old_target.height(), 1e-6),
+        )
+        self.apply_zoom_factor(factor, anchor_norm=anchor_norm, emit_signal=True)
+        event.accept()
 
     def focusOutEvent(self, event) -> None:
         self._drag_active = False
@@ -407,7 +487,8 @@ class InlineVolumePreview(QWidget):
         self._projection = projection
         hint = "interactive" if interactive else "full"
         self._status_text = (
-            f"{_view_mode_label(self._view_mode)} view | left-drag rotate | G reset | {hint} preview."
+            f"{_view_mode_label(self._view_mode)} view | wheel zoom {self._view_zoom:.2f}x | "
+            f"left-drag rotate | G reset | {hint} preview."
         )
         self.update()
 
@@ -420,6 +501,28 @@ class InlineVolumePreview(QWidget):
         left = margin + (width - size) / 2.0
         top = margin + (height - size) / 2.0
         return QRectF(left, top, size, size)
+
+    def _image_target_rect(self, viewport: QRectF | None = None) -> QRectF:
+        view = self._content_rect() if viewport is None else viewport
+        zoom = max(_MIN_VIEW_ZOOM, float(self._view_zoom))
+        width = view.width() * zoom
+        height = view.height() * zoom
+        center = np.asarray(self._view_center_norm, dtype=np.float32)
+        left = view.center().x() - float(center[0]) * width
+        top = view.center().y() - float(center[1]) * height
+        return QRectF(left, top, width, height)
+
+    def _clamp_view_center(self) -> None:
+        zoom = max(_MIN_VIEW_ZOOM, float(self._view_zoom))
+        min_center = 0.5 / zoom
+        max_center = 1.0 - min_center
+        if max_center < min_center:
+            min_center = max_center = 0.5
+        self._view_center_norm = np.clip(
+            np.asarray(self._view_center_norm, dtype=np.float32),
+            min_center,
+            max_center,
+        )
 
     def _draw_slice_plane(self, painter: QPainter, target: QRectF) -> None:
         if self._projection is None or self._current_slice_z is None:

@@ -299,6 +299,70 @@ def _benchmark_quick_auto(app: QApplication, raw: np.ndarray, pred: np.ndarray) 
         controller.script_quick_seed_dilate_bg_int_bg(show_status=False, push_undo=False, **params)
         optimized_sec = time.perf_counter() - t1
         optimized_pixels = int(controller.model.get_mask().sum())
+
+        async_single_calls = {"count": 0}
+        async_single_gate = {}
+
+        def async_single_update(*args, **kwargs):
+            async_single_calls["count"] += 1
+            return original_update_view(*args, **kwargs)
+
+        controller._update_view = async_single_update
+        controller._post_quick_auto_quality_gate = (
+            lambda metrics, context_label, elapsed_sec=None: async_single_gate.update(
+                {
+                    "metrics": dict(metrics),
+                    "context_label": context_label,
+                    "elapsed_sec": elapsed_sec,
+                }
+            )
+        )
+        _restore_masks()
+        t2 = time.perf_counter()
+        controller._run_quick_auto_script()
+        async_single_start_sec = time.perf_counter() - t2
+        ok = _wait_until(app, lambda: controller.quick_auto_thread is None, timeout_sec=20.0)
+        if not ok:
+            raise RuntimeError("Background quick auto (single) did not finish")
+        async_single_total_sec = time.perf_counter() - t2
+        async_single_pixels = int(controller.model.get_mask().sum())
+
+        async_stack_calls = {"count": 0}
+        async_stack_gate = {}
+
+        def async_stack_update(*args, **kwargs):
+            async_stack_calls["count"] += 1
+            return original_update_view(*args, **kwargs)
+
+        controller._update_view = async_stack_update
+        controller._post_quick_auto_stack_quality_gate = (
+            lambda metrics_by_slice, indices, elapsed_sec=None: async_stack_gate.update(
+                {
+                    "metrics_by_slice": list(metrics_by_slice),
+                    "indices": list(indices),
+                    "elapsed_sec": elapsed_sec,
+                }
+            )
+        )
+        _restore_masks()
+        stack_indices = sorted(set([0, slice_index, raw.shape[0] - 1]))
+        t3 = time.perf_counter()
+        started = controller._start_quick_auto_job(
+            mode="stack",
+            indices=stack_indices,
+            label="benchmark stack quick auto",
+            params=params,
+        )
+        if not started:
+            raise RuntimeError("Background quick auto (stack) failed to start")
+        async_stack_start_sec = time.perf_counter() - t3
+        ok = _wait_until(app, lambda: controller.quick_auto_thread is None, timeout_sec=20.0)
+        if not ok:
+            raise RuntimeError("Background quick auto (stack) did not finish")
+        async_stack_total_sec = time.perf_counter() - t3
+        async_stack_changed_slices = sum(
+            1 for metrics in async_stack_gate.get("metrics_by_slice", []) if bool(metrics.get("changed"))
+        )
         return {
             "baseline_sec": round(baseline_sec, 6),
             "baseline_update_calls": baseline_calls["count"],
@@ -307,6 +371,17 @@ def _benchmark_quick_auto(app: QApplication, raw: np.ndarray, pred: np.ndarray) 
             "optimized_update_calls": optimized_calls["count"],
             "optimized_pixels": optimized_pixels,
             "speedup": round(baseline_sec / max(optimized_sec, 1e-9), 3),
+            "async_single_start_sec": round(async_single_start_sec, 6),
+            "async_single_total_sec": round(async_single_total_sec, 6),
+            "async_single_update_calls": async_single_calls["count"],
+            "async_single_pixels": async_single_pixels,
+            "async_single_elapsed_sec": round(float(async_single_gate.get("elapsed_sec", 0.0)), 6),
+            "async_stack_start_sec": round(async_stack_start_sec, 6),
+            "async_stack_total_sec": round(async_stack_total_sec, 6),
+            "async_stack_update_calls": async_stack_calls["count"],
+            "async_stack_slices": len(async_stack_gate.get("indices", [])),
+            "async_stack_changed_slices": async_stack_changed_slices,
+            "async_stack_elapsed_sec": round(float(async_stack_gate.get("elapsed_sec", 0.0)), 6),
         }
     finally:
         controller._update_view = original_update_view

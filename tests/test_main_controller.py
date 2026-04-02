@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import QApplication
 from zstack_anno.controllers.main_controller import MainController
 from zstack_anno.utils.volume_utils import VolumeSource
 import zstack_anno.controllers.morphology_helper as morphology_helper
+import zstack_anno.controllers.script_helper as script_helper
 
 
 @pytest.fixture(scope="module")
@@ -75,6 +76,23 @@ def _wait_until(app, predicate, timeout_sec: float = 1.5) -> bool:
         time.sleep(0.01)
     app.processEvents()
     return predicate()
+
+
+def _configure_quick_auto_data(controller, *, n_slices: int = 3) -> None:
+    data = np.zeros((n_slices, 32, 32), dtype=np.uint8)
+    data[:, 10:22, 11:21] = 220
+    controller.model.data = data
+    controller.model.original_data = data.copy()
+    controller.model.replace_masks(np.zeros_like(data, dtype=np.uint8), dirty=True)
+    controller.model.index = min(n_slices // 2, n_slices - 1)
+    controller.model.masks[controller.model.index, 16, 16] = 1
+    controller.model.update_components()
+    controller.slider.setRange(0, n_slices - 1)
+    controller.slider.setValue(controller.model.index)
+    controller.slider.setEnabled(True)
+    controller.undo_stack.clear()
+    controller.redo_stack.clear()
+    controller.history.clear()
 
 
 def test_p_brush_uses_left_add_and_right_erase(controller, app):
@@ -364,3 +382,167 @@ def test_quick_auto_script_updates_once_and_pushes_single_undo(controller, monke
     assert calls["count"] == 1
     assert len(controller.undo_stack) == 1
     assert controller.history == ["quick_auto"]
+
+
+def test_quick_auto_script_runs_in_background(controller, app, monkeypatch):
+    _configure_quick_auto_data(controller, n_slices=3)
+    original_fn = script_helper._run_quick_auto_single
+    gate_calls = {}
+
+    def delayed_single(*args, **kwargs):
+        time.sleep(0.06)
+        return original_fn(*args, **kwargs)
+
+    monkeypatch.setattr(script_helper, "_run_quick_auto_single", delayed_single)
+    monkeypatch.setattr(
+        controller,
+        "_post_quick_auto_quality_gate",
+        lambda metrics, context_label, elapsed_sec=None: gate_calls.update(
+            {
+                "metrics": metrics,
+                "context_label": context_label,
+                "elapsed_sec": elapsed_sec,
+            }
+        ),
+    )
+
+    start = time.perf_counter()
+    controller._run_quick_auto_script()
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.05
+    assert controller.quick_auto_thread is not None
+    assert controller.quick_auto_thread.isRunning()
+    assert controller.quick_auto_cancel_btn.isEnabled()
+    assert "background" in controller.statusBar().currentMessage().lower()
+    assert _wait_until(app, lambda: controller.quick_auto_thread is None, timeout_sec=2.0)
+    assert gate_calls["context_label"] == f"slice {controller.model.index + 1}"
+    assert gate_calls["elapsed_sec"] is not None
+    assert len(controller.undo_stack) == 1
+    assert controller.history == ["quick_auto"]
+
+
+def test_quick_auto_script_cancelled_keeps_masks_unchanged(controller, app, monkeypatch):
+    _configure_quick_auto_data(controller, n_slices=3)
+    before_masks = controller.model.masks.copy()
+
+    def cancellable_single(*args, **kwargs):
+        cancel_event = kwargs.get("cancel_event")
+        for _ in range(40):
+            time.sleep(0.01)
+            if cancel_event is not None and cancel_event.is_set():
+                raise script_helper.QuickAutoCancelled("cancelled")
+        raise AssertionError("Quick auto thread was expected to be cancelled before completion")
+
+    monkeypatch.setattr(script_helper, "_run_quick_auto_single", cancellable_single)
+
+    controller._run_quick_auto_script()
+    assert controller.quick_auto_thread is not None
+    assert controller.quick_auto_thread.isRunning()
+
+    controller._cancel_quick_auto()
+
+    assert _wait_until(app, lambda: controller.quick_auto_thread is None, timeout_sec=2.0)
+    assert np.array_equal(controller.model.masks, before_masks)
+    assert len(controller.undo_stack) == 0
+    assert controller.history == []
+    assert "cancelled" in controller.statusBar().currentMessage().lower()
+    assert "no changes were applied" in controller.statusBar().currentMessage().lower()
+
+
+def test_quick_auto_stack_runs_in_background(controller, app, monkeypatch):
+    _configure_quick_auto_data(controller, n_slices=3)
+    original_fn = script_helper._run_quick_auto_stack
+    gate_calls = {}
+
+    def delayed_stack(*args, **kwargs):
+        time.sleep(0.06)
+        return original_fn(*args, **kwargs)
+
+    monkeypatch.setattr(script_helper, "_run_quick_auto_stack", delayed_stack)
+    monkeypatch.setattr(
+        controller,
+        "_post_quick_auto_stack_quality_gate",
+        lambda metrics_by_slice, indices, elapsed_sec=None: gate_calls.update(
+            {
+                "metrics_by_slice": metrics_by_slice,
+                "indices": list(indices),
+                "elapsed_sec": elapsed_sec,
+            }
+        ),
+    )
+
+    start = time.perf_counter()
+    started = controller._start_quick_auto_job(
+        mode="stack",
+        indices=[0, 1, 2],
+        label="stack quick auto",
+        params=controller._quick_auto_params_for_selected_preset(),
+    )
+    elapsed = time.perf_counter() - start
+
+    assert started is True
+    assert elapsed < 0.05
+    assert controller.quick_auto_thread is not None
+    assert controller.quick_auto_thread.isRunning()
+    assert controller.quick_auto_cancel_btn.isEnabled()
+    assert _wait_until(app, lambda: controller.quick_auto_thread is None, timeout_sec=2.0)
+    assert gate_calls["indices"] == [0, 1, 2]
+    assert len(gate_calls["metrics_by_slice"]) == 3
+    assert gate_calls["elapsed_sec"] is not None
+
+
+def test_quick_auto_stack_cancelled_discards_partial_result(controller, app, monkeypatch):
+    _configure_quick_auto_data(controller, n_slices=4)
+    before_masks = controller.model.masks.copy()
+
+    def cancellable_stack(data_stack, mask_stack, indices, *, cancel_event=None, progress_fn=None, **params):
+        work_masks = np.asarray(mask_stack, dtype=np.uint8).copy()
+        metrics = []
+        ordered = [int(idx) for idx in indices]
+        for processed, slice_index in enumerate(ordered, start=1):
+            time.sleep(0.03)
+            metric = {
+                "slice_index": slice_index,
+                "before_pixels": int(np.count_nonzero(work_masks[slice_index])),
+                "after_pixels": int(np.count_nonzero(work_masks[slice_index])) + 4,
+                "changed": True,
+            }
+            if progress_fn is not None:
+                progress_fn(processed, len(ordered), slice_index, metric)
+            if cancel_event is not None and cancel_event.is_set():
+                raise script_helper.QuickAutoCancelled("cancelled")
+            work_masks[slice_index, 5:7, 5:7] = 1
+            metrics.append(metric)
+        return {
+            "masks": work_masks,
+            "indices": ordered,
+            "metrics_by_slice": metrics,
+            "changed": True,
+        }
+
+    monkeypatch.setattr(script_helper, "_run_quick_auto_stack", cancellable_stack)
+
+    started = controller._start_quick_auto_job(
+        mode="stack",
+        indices=[0, 1, 2, 3],
+        label="stack quick auto",
+        params=controller._quick_auto_params_for_selected_preset(),
+    )
+    assert started is True
+    assert controller.quick_auto_thread is not None
+    assert controller.quick_auto_thread.isRunning()
+    assert _wait_until(
+        app,
+        lambda: "1/4" in controller.statusBar().currentMessage()
+        or "2/4" in controller.statusBar().currentMessage(),
+        timeout_sec=1.0,
+    )
+
+    controller._cancel_quick_auto()
+
+    assert _wait_until(app, lambda: controller.quick_auto_thread is None, timeout_sec=2.0)
+    assert np.array_equal(controller.model.masks, before_masks)
+    message = controller.statusBar().currentMessage().lower()
+    assert "cancelled" in message
+    assert "no changes were applied" in message

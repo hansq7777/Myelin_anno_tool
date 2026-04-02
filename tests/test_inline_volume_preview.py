@@ -13,11 +13,12 @@ if str(root) not in sys.path:
     sys.path.insert(0, str(root))
 
 from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt
-from PyQt5.QtGui import QKeyEvent, QMouseEvent
+from PyQt5.QtGui import QKeyEvent, QMouseEvent, QWheelEvent
 from PyQt5.QtWidgets import QApplication
 
 from zstack_anno.controllers.main_controller import MainController
 import zstack_anno.views.inline_volume_preview as inline_volume_preview
+from zstack_anno.views.canvas import SliceCanvas
 from zstack_anno.views.inline_volume_preview import (
     InlineVolumePreview,
     _MAX_VOXELS,
@@ -48,6 +49,20 @@ def _wait_until(app, predicate, timeout_sec: float = 1.5) -> bool:
         time.sleep(0.01)
     app.processEvents()
     return predicate()
+
+
+def _wheel_event_for(widget, delta_y: int = 120) -> QWheelEvent:
+    center = widget.rect().center()
+    return QWheelEvent(
+        QPointF(center),
+        QPointF(center),
+        QPoint(0, 0),
+        QPoint(0, delta_y),
+        Qt.NoButton,
+        Qt.NoModifier,
+        Qt.ScrollUpdate,
+        False,
+    )
 
 
 def test_choose_downsample_steps_keeps_preview_volume_bounded():
@@ -85,6 +100,17 @@ def test_build_preview_image_supports_multiple_view_modes(app):
         assert projection.box_norm_xy.shape == (8, 2)
 
 
+def test_slice_canvas_wheel_zoom_uses_larger_step():
+    canvas = SliceCanvas()
+    canvas.resize(320, 320)
+    canvas.set_image(np.zeros((64, 64), dtype=np.uint8), reset_view=True)
+    before = canvas.zoom_factor()
+
+    QApplication.sendEvent(canvas.viewport(), _wheel_event_for(canvas.viewport(), 120))
+
+    assert canvas.zoom_factor() > before * 1.1
+
+
 def test_main_controller_inline_preview_toggle_updates_projection(app):
     widget = MainController()
     try:
@@ -105,6 +131,8 @@ def test_main_controller_inline_preview_toggle_updates_projection(app):
         assert _wait_until(app, lambda: widget.inline_volume_preview._base_image is not None)
 
         assert widget._inline_volume_enabled is True
+        assert widget.inline_view_combo.currentData() == "xy"
+        assert widget.inline_volume_preview.view_mode() == "xy"
         assert widget.inline_volume_preview._base_image is not None
         assert widget.inline_volume_preview._projection is not None
         assert widget.inline_volume_preview._locator_xyz is not None
@@ -234,3 +262,78 @@ def test_inline_volume_preview_drag_rotates_and_g_resets(app):
     assert yaw_offset == pytest.approx(0.0)
     assert pitch_offset == pytest.approx(0.0)
     assert np.allclose(preview._projection.rotation, base_rotation)
+
+
+def test_inline_volume_preview_wheel_zoom_scales_without_rebuild(app):
+    preview = InlineVolumePreview()
+    preview.resize(360, 360)
+    raw = np.random.randint(0, 255, (16, 64, 64), dtype=np.uint8)
+    mask = np.zeros_like(raw, dtype=np.uint8)
+    mask[4:11, 22:46, 20:48] = 1
+
+    preview.set_view_mode("xy")
+    preview.set_volume(raw, mask, (0.4, 0.4, 0.5), cache_key=("stack-c",))
+    assert _wait_until(app, lambda: preview._render_thread is None and preview._projection is not None)
+
+    before_zoom = preview.zoom_factor()
+    before_width = preview._image_target_rect(preview._content_rect()).width()
+    center = preview.rect().center()
+    wheel_in = QWheelEvent(
+        QPointF(center),
+        QPointF(center),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.NoButton,
+        Qt.NoModifier,
+        Qt.ScrollUpdate,
+        False,
+    )
+    QApplication.sendEvent(preview, wheel_in)
+    app.processEvents()
+
+    assert preview.zoom_factor() > before_zoom
+    assert preview._image_target_rect(preview._content_rect()).width() > before_width
+    assert preview._render_thread is None
+
+
+def test_main_controller_canvas_and_inline_zoom_stay_in_sync(app):
+    widget = MainController()
+    try:
+        data = np.random.randint(0, 255, (12, 64, 64), dtype=np.uint8)
+        widget.model.data = data
+        widget.model.original_data = data.copy()
+        widget.model.ensure_masks()
+        widget.slider.setRange(0, data.shape[0] - 1)
+        widget.slider.setEnabled(True)
+        widget._update_view(reset_view=True)
+        widget.inline_volume_chk.setChecked(True)
+        app.processEvents()
+        widget._refresh_inline_volume_preview()
+        assert _wait_until(app, lambda: widget.inline_volume_preview._base_image is not None)
+
+        canvas_before = widget.canvas.zoom_factor()
+        preview_before = widget.inline_volume_preview.zoom_factor()
+        QApplication.sendEvent(
+            widget.canvas.viewport(),
+            _wheel_event_for(widget.canvas.viewport(), 120),
+        )
+        app.processEvents()
+
+        assert widget.canvas.zoom_factor() > canvas_before
+        assert widget.inline_volume_preview.zoom_factor() > preview_before
+
+        canvas_mid = widget.canvas.zoom_factor()
+        preview_mid = widget.inline_volume_preview.zoom_factor()
+        QApplication.sendEvent(
+            widget.inline_volume_preview,
+            _wheel_event_for(widget.inline_volume_preview, 120),
+        )
+        app.processEvents()
+
+        assert widget.inline_volume_preview.zoom_factor() > preview_mid
+        assert widget.canvas.zoom_factor() > canvas_mid
+    finally:
+        widget.model.mask_dirty = False
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()

@@ -1,13 +1,335 @@
 from __future__ import annotations
 
 import numpy as np
+import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Sequence
+
+from PyQt5.QtCore import QThread, pyqtSignal
 
 from ..utils import morphology_tools
 
 if TYPE_CHECKING:  # pragma: no cover
     from .main_controller import MainController
+
+
+class QuickAutoCancelled(RuntimeError):
+    """Raised when a background quick auto run is cancelled."""
+
+
+def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise QuickAutoCancelled("Quick auto cancelled")
+
+
+def _quick_auto_slice_pipeline_for_arrays(
+    data_stack: np.ndarray,
+    mask_stack: np.ndarray | None,
+    slice_index: int,
+    original_mask: np.ndarray,
+    *,
+    seed_percentile: float = 85.0,
+    seed_pixel_percent: float = 1.0,
+    dilate_iterations: int = 1,
+    bg1_percentile: float = 8.0,
+    bg1_bins: int = 0,
+    grow_diff_pct: float = 35.0,
+    grow_hist_pct: float = 20.0,
+    grow_force_pct: float = -1.0,
+    grow_limit: int = 30000,
+    bg2_percentile: float = 12.0,
+    bg2_bins: int = 0,
+    final_bg_repeat: int = 5,
+    final_bg_percentile: float = 5.0,
+    final_bg_bins: int = 5,
+    final_small_threshold: int = 20,
+    addition_support_percentile: float = 75.0,
+    protect_small_original: bool = True,
+    small_component_guard: int = 120,
+    cancel_event: threading.Event | None = None,
+) -> np.ndarray:
+    img = np.asarray(data_stack[slice_index])
+    cur_mask = np.asarray(original_mask, dtype=np.uint8).copy()
+    other_fg_values = np.array([], dtype=img.dtype)
+    if mask_stack is not None:
+        other_masks = np.asarray(mask_stack).copy()
+        other_masks[slice_index] = 0
+        other_fg_values = np.asarray(data_stack)[other_masks > 0]
+
+    def global_threshold(bins: int, slice_mask: np.ndarray) -> float | None:
+        if bins <= 0:
+            return None
+        current_values = img[slice_mask > 0]
+        if other_fg_values.size > 0 and current_values.size > 0:
+            values = np.concatenate((other_fg_values, current_values))
+        elif other_fg_values.size > 0:
+            values = other_fg_values
+        else:
+            values = current_values
+        if values.size == 0:
+            return None
+        _hist, edges = np.histogram(values, bins=256)
+        idx = min(int(bins), len(edges) - 2)
+        return float(edges[idx])
+
+    _raise_if_cancelled(cancel_event)
+    seeds = morphology_tools.sample_seeds(
+        img,
+        seed_percentile,
+        pixel_percent=seed_pixel_percent,
+    )
+    cur_mask[seeds > 0] = 1
+    _raise_if_cancelled(cancel_event)
+    cur_mask = morphology_tools.dilate(cur_mask, iterations=dilate_iterations)
+    _raise_if_cancelled(cancel_event)
+    cur_mask = morphology_tools.remove_mask_background(
+        img,
+        cur_mask,
+        bg1_percentile,
+        global_threshold(bg1_bins, cur_mask),
+    )
+    _raise_if_cancelled(cancel_event)
+
+    hist_pct = grow_hist_pct if grow_hist_pct >= 0 else None
+    force_pct = grow_force_pct if grow_force_pct >= 0 else None
+    limit = grow_limit if grow_limit > 0 else None
+    cur_mask = morphology_tools.intensity_region_grow(
+        img.astype(float),
+        cur_mask,
+        grow_diff_pct,
+        hist_pct,
+        force_pct,
+        limit,
+        cancel_event=cancel_event,
+    )
+
+    _raise_if_cancelled(cancel_event)
+    cur_mask = morphology_tools.remove_mask_background(
+        img,
+        cur_mask,
+        bg2_percentile,
+        global_threshold(bg2_bins, cur_mask),
+    )
+    for _ in range(max(0, int(final_bg_repeat))):
+        _raise_if_cancelled(cancel_event)
+        cur_mask = morphology_tools.remove_mask_background(
+            img,
+            cur_mask,
+            final_bg_percentile,
+            global_threshold(final_bg_bins, cur_mask),
+        )
+
+    if final_small_threshold > 0 and mask_stack is not None:
+        _raise_if_cancelled(cancel_event)
+        temp_stack = np.asarray(mask_stack).copy()
+        temp_stack[slice_index] = cur_mask
+        filtered_stack, _labels = morphology_tools.remove_small_components(
+            temp_stack,
+            int(final_small_threshold),
+        )
+        cur_mask = filtered_stack[slice_index]
+
+    if addition_support_percentile >= 0:
+        _raise_if_cancelled(cancel_event)
+        img_float = img.astype(float)
+        support_thresh = float(np.percentile(img_float, addition_support_percentile))
+        support = img_float >= support_thresh
+        additions = (cur_mask > 0) & (original_mask == 0)
+        cur_mask[additions & ~support] = 0
+
+    if protect_small_original and small_component_guard > 0:
+        _raise_if_cancelled(cancel_event)
+        labels = morphology_tools.label_components(original_mask)
+        if labels.size > 0:
+            counts = np.bincount(labels.ravel())
+            if counts.size > 1:
+                keep_ids = np.where(
+                    (np.arange(counts.size) > 0) & (counts <= small_component_guard)
+                )[0]
+                if keep_ids.size > 0:
+                    protected = np.isin(labels, keep_ids)
+                    cur_mask[protected] = 1
+
+    _raise_if_cancelled(cancel_event)
+    return cur_mask.astype(np.uint8, copy=False)
+
+
+def _run_quick_auto_single(
+    data_stack: np.ndarray,
+    mask_stack: np.ndarray,
+    slice_index: int,
+    *,
+    cancel_event: threading.Event | None = None,
+    **params: object,
+) -> dict[str, object]:
+    original_mask = np.asarray(mask_stack[slice_index], dtype=np.uint8).copy()
+    before_pixels = int(np.count_nonzero(original_mask))
+    mask = _quick_auto_slice_pipeline_for_arrays(
+        data_stack,
+        mask_stack,
+        slice_index,
+        original_mask,
+        cancel_event=cancel_event,
+        **params,
+    )
+    after_pixels = int(np.count_nonzero(mask))
+    return {
+        "slice_index": int(slice_index),
+        "mask": mask,
+        "before_pixels": before_pixels,
+        "after_pixels": after_pixels,
+        "changed": not np.array_equal(mask, original_mask),
+    }
+
+
+def _run_quick_auto_stack(
+    data_stack: np.ndarray,
+    mask_stack: np.ndarray,
+    indices: Sequence[int],
+    *,
+    cancel_event: threading.Event | None = None,
+    progress_fn: Callable[[int, int, int, dict[str, object]], None] | None = None,
+    **params: object,
+) -> dict[str, object]:
+    work_masks = np.asarray(mask_stack, dtype=np.uint8).copy()
+    ordered_indices = [int(idx) for idx in indices]
+    metrics_by_slice: list[dict[str, object]] = []
+    total = len(ordered_indices)
+    for processed, slice_index in enumerate(ordered_indices, start=1):
+        _raise_if_cancelled(cancel_event)
+        metrics = _run_quick_auto_single(
+            data_stack,
+            work_masks,
+            slice_index,
+            cancel_event=cancel_event,
+            **params,
+        )
+        work_masks[slice_index] = np.asarray(metrics["mask"], dtype=np.uint8)
+        metrics_by_slice.append(metrics)
+        if progress_fn is not None:
+            progress_fn(processed, total, slice_index, metrics)
+    _raise_if_cancelled(cancel_event)
+    return {
+        "masks": work_masks,
+        "indices": ordered_indices,
+        "metrics_by_slice": metrics_by_slice,
+        "changed": any(bool(m.get("changed")) for m in metrics_by_slice),
+    }
+
+
+class QuickAutoThread(QThread):
+    succeeded = pyqtSignal(object)
+    failed = pyqtSignal(object)
+    cancelled = pyqtSignal(object)
+    progress = pyqtSignal(object)
+
+    def __init__(
+        self,
+        *,
+        data_stack: np.ndarray,
+        mask_stack: np.ndarray,
+        params: dict[str, object],
+        request_id: int,
+        image_revision: int,
+        mask_revision: int,
+        mode: str,
+        indices: Sequence[int],
+        cancel_event: threading.Event,
+    ) -> None:
+        super().__init__()
+        self.data_stack = np.asarray(data_stack)
+        self.mask_stack = np.asarray(mask_stack, dtype=np.uint8)
+        self.params = dict(params)
+        self.request_id = int(request_id)
+        self.image_revision = int(image_revision)
+        self.mask_revision = int(mask_revision)
+        self.mode = str(mode)
+        self.indices = [int(idx) for idx in indices]
+        self.cancel_event = cancel_event
+
+    def run(self) -> None:
+        started = time.monotonic()
+        processed = 0
+        total = len(self.indices)
+
+        def progress_cb(
+            cur: int,
+            total_count: int,
+            slice_index: int,
+            metrics: dict[str, object],
+        ) -> None:
+            nonlocal processed
+            processed = int(cur)
+            self.progress.emit(
+                {
+                    "request_id": self.request_id,
+                    "mode": self.mode,
+                    "processed": int(cur),
+                    "total": int(total_count),
+                    "slice_index": int(slice_index),
+                    "metrics": metrics,
+                }
+            )
+
+        try:
+            if self.mode == "single":
+                if not self.indices:
+                    raise ValueError("Quick auto single mode requires one slice index")
+                result = _run_quick_auto_single(
+                    self.data_stack,
+                    self.mask_stack,
+                    self.indices[0],
+                    cancel_event=self.cancel_event,
+                    **self.params,
+                )
+                processed = 1
+            elif self.mode == "stack":
+                result = _run_quick_auto_stack(
+                    self.data_stack,
+                    self.mask_stack,
+                    self.indices,
+                    cancel_event=self.cancel_event,
+                    progress_fn=progress_cb,
+                    **self.params,
+                )
+                processed = total
+            else:
+                raise ValueError(f"Unsupported quick auto mode: {self.mode}")
+        except QuickAutoCancelled:
+            self.cancelled.emit(
+                {
+                    "request_id": self.request_id,
+                    "mode": self.mode,
+                    "processed": processed,
+                    "total": total,
+                    "elapsed_sec": time.monotonic() - started,
+                }
+            )
+            return
+        except Exception as exc:
+            self.failed.emit(
+                {
+                    "request_id": self.request_id,
+                    "mode": self.mode,
+                    "processed": processed,
+                    "total": total,
+                    "elapsed_sec": time.monotonic() - started,
+                    "error": str(exc),
+                }
+            )
+            return
+        self.succeeded.emit(
+            {
+                "request_id": self.request_id,
+                "mode": self.mode,
+                "image_revision": self.image_revision,
+                "mask_revision": self.mask_revision,
+                "processed": processed,
+                "total": total,
+                "elapsed_sec": time.monotonic() - started,
+                **result,
+            }
+        )
 
 
 class ScriptMixin:
@@ -35,100 +357,35 @@ class ScriptMixin:
         addition_support_percentile: float,
         protect_small_original: bool,
         small_component_guard: int,
+        cancel_event: threading.Event | None = None,
     ) -> np.ndarray:
-        img = self.model._extract_slice(self.model.index)
-        cur_mask = original_mask.copy()
-        other_fg_values = np.array([], dtype=img.dtype)
-        if self.model.masks is not None and self.model.data is not None:
-            other_masks = self.model.masks.copy()
-            other_masks[self.model.index] = 0
-            other_fg_values = self.model.data[other_masks > 0]
-
-        def global_threshold(bins: int, slice_mask: np.ndarray) -> float | None:
-            if bins <= 0:
-                return None
-            current_values = img[slice_mask > 0]
-            if other_fg_values.size > 0 and current_values.size > 0:
-                values = np.concatenate((other_fg_values, current_values))
-            elif other_fg_values.size > 0:
-                values = other_fg_values
-            else:
-                values = current_values
-            if values.size == 0:
-                return None
-            _hist, edges = np.histogram(values, bins=256)
-            idx = min(int(bins), len(edges) - 2)
-            return float(edges[idx])
-
-        seeds = morphology_tools.sample_seeds(
-            img,
-            seed_percentile,
-            pixel_percent=seed_pixel_percent,
+        if self.model.data is None:
+            raise RuntimeError("Image stack must be loaded before running quick auto")
+        return _quick_auto_slice_pipeline_for_arrays(
+            self.model.data,
+            self.model.masks,
+            self.model.index,
+            original_mask,
+            seed_percentile=seed_percentile,
+            seed_pixel_percent=seed_pixel_percent,
+            dilate_iterations=dilate_iterations,
+            bg1_percentile=bg1_percentile,
+            bg1_bins=bg1_bins,
+            grow_diff_pct=grow_diff_pct,
+            grow_hist_pct=grow_hist_pct,
+            grow_force_pct=grow_force_pct,
+            grow_limit=grow_limit,
+            bg2_percentile=bg2_percentile,
+            bg2_bins=bg2_bins,
+            final_bg_repeat=final_bg_repeat,
+            final_bg_percentile=final_bg_percentile,
+            final_bg_bins=final_bg_bins,
+            final_small_threshold=final_small_threshold,
+            addition_support_percentile=addition_support_percentile,
+            protect_small_original=protect_small_original,
+            small_component_guard=small_component_guard,
+            cancel_event=cancel_event,
         )
-        cur_mask[seeds > 0] = 1
-        cur_mask = morphology_tools.dilate(cur_mask, iterations=dilate_iterations)
-        cur_mask = morphology_tools.remove_mask_background(
-            img,
-            cur_mask,
-            bg1_percentile,
-            global_threshold(bg1_bins, cur_mask),
-        )
-
-        hist_pct = grow_hist_pct if grow_hist_pct >= 0 else None
-        force_pct = grow_force_pct if grow_force_pct >= 0 else None
-        limit = grow_limit if grow_limit > 0 else None
-        cur_mask = morphology_tools.intensity_region_grow(
-            img.astype(float),
-            cur_mask,
-            grow_diff_pct,
-            hist_pct,
-            force_pct,
-            limit,
-        )
-
-        cur_mask = morphology_tools.remove_mask_background(
-            img,
-            cur_mask,
-            bg2_percentile,
-            global_threshold(bg2_bins, cur_mask),
-        )
-        for _ in range(max(0, int(final_bg_repeat))):
-            cur_mask = morphology_tools.remove_mask_background(
-                img,
-                cur_mask,
-                final_bg_percentile,
-                global_threshold(final_bg_bins, cur_mask),
-            )
-
-        if final_small_threshold > 0 and self.model.masks is not None:
-            temp_stack = self.model.masks.copy()
-            temp_stack[self.model.index] = cur_mask
-            filtered_stack, _labels = morphology_tools.remove_small_components(
-                temp_stack,
-                int(final_small_threshold),
-            )
-            cur_mask = filtered_stack[self.model.index]
-
-        if addition_support_percentile >= 0:
-            img_float = img.astype(float)
-            support_thresh = float(np.percentile(img_float, addition_support_percentile))
-            support = img_float >= support_thresh
-            additions = (cur_mask > 0) & (original_mask == 0)
-            cur_mask[additions & ~support] = 0
-
-        if protect_small_original and small_component_guard > 0:
-            labels = morphology_tools.label_components(original_mask)
-            if labels.size > 0:
-                counts = np.bincount(labels.ravel())
-                if counts.size > 1:
-                    keep_ids = np.where(
-                        (np.arange(counts.size) > 0) & (counts <= small_component_guard)
-                    )[0]
-                    if keep_ids.size > 0:
-                        protected = np.isin(labels, keep_ids)
-                        cur_mask[protected] = 1
-
-        return cur_mask.astype(np.uint8, copy=False)
 
     def script_quick_seed_dilate_bg_int_bg(
         self: "MainController",
@@ -152,6 +409,7 @@ class ScriptMixin:
         small_component_guard: int = 120,
         show_status: bool = True,
         push_undo: bool = False,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, int | bool] | None:
         """Run the default quick-fix pipeline on the current slice.
 
@@ -173,27 +431,33 @@ class ScriptMixin:
         start = time.monotonic()
         if push_undo:
             self._push_undo("quick_auto")
-        cur_mask = self._quick_auto_slice_pipeline(
-            original_mask,
-            seed_percentile=seed_percentile,
-            seed_pixel_percent=seed_pixel_percent,
-            dilate_iterations=dilate_iterations,
-            bg1_percentile=bg1_percentile,
-            bg1_bins=bg1_bins,
-            grow_diff_pct=grow_diff_pct,
-            grow_hist_pct=grow_hist_pct,
-            grow_force_pct=grow_force_pct,
-            grow_limit=grow_limit,
-            bg2_percentile=bg2_percentile,
-            bg2_bins=bg2_bins,
-            final_bg_repeat=final_bg_repeat,
-            final_bg_percentile=final_bg_percentile,
-            final_bg_bins=final_bg_bins,
-            final_small_threshold=final_small_threshold,
-            addition_support_percentile=addition_support_percentile,
-            protect_small_original=protect_small_original,
-            small_component_guard=small_component_guard,
-        )
+        try:
+            cur_mask = self._quick_auto_slice_pipeline(
+                original_mask,
+                seed_percentile=seed_percentile,
+                seed_pixel_percent=seed_pixel_percent,
+                dilate_iterations=dilate_iterations,
+                bg1_percentile=bg1_percentile,
+                bg1_bins=bg1_bins,
+                grow_diff_pct=grow_diff_pct,
+                grow_hist_pct=grow_hist_pct,
+                grow_force_pct=grow_force_pct,
+                grow_limit=grow_limit,
+                bg2_percentile=bg2_percentile,
+                bg2_bins=bg2_bins,
+                final_bg_repeat=final_bg_repeat,
+                final_bg_percentile=final_bg_percentile,
+                final_bg_bins=final_bg_bins,
+                final_small_threshold=final_small_threshold,
+                addition_support_percentile=addition_support_percentile,
+                protect_small_original=protect_small_original,
+                small_component_guard=small_component_guard,
+                cancel_event=cancel_event,
+            )
+        except QuickAutoCancelled:
+            if push_undo:
+                self._discard_last_undo()
+            return None
         changed = not np.array_equal(cur_mask, original_mask)
         if push_undo and not changed:
             self._discard_last_undo()
