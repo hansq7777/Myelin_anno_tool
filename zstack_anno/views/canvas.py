@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene
-from PyQt5.QtGui import QPixmap, QImage, QTransform
+from PyQt5.QtGui import QColor, QPainter, QPixmap, QImage, QTransform
 from PyQt5.QtCore import Qt, QRectF, QTimer, pyqtSignal
 import numpy as np
 
@@ -27,7 +27,10 @@ class SliceCanvas(QGraphicsView):
         self._image_item = None
         self._mask_item = None
         self._zoom = 1.0
+        self._rotation_deg = 0.0
         self._mask_opacity = 0.5  # default 50%
+        self._review_badge_text = ""
+        self._review_badge_done = False
         self._suspend_view_window_signal = False
         self._view_window_timer = QTimer(self)
         self._view_window_timer.setSingleShot(True)
@@ -63,10 +66,23 @@ class SliceCanvas(QGraphicsView):
             self.resetTransform()
             self._zoom = 1.0
             self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+            if abs(self._rotation_deg) > 1e-6:
+                anchor = self.transformationAnchor()
+                self.setTransformationAnchor(QGraphicsView.AnchorViewCenter)
+                self.rotate(self._rotation_deg)
+                self.setTransformationAnchor(anchor)
             self._schedule_view_window_changed()
 
     def zoom_factor(self) -> float:
         return float(self._zoom)
+
+    def view_rotation_deg(self) -> float:
+        return float(self._rotation_deg)
+
+    def set_review_badge(self, text: str, *, done: bool = False) -> None:
+        self._review_badge_text = (text or "").strip().upper()
+        self._review_badge_done = bool(done)
+        self.viewport().update()
 
     def apply_zoom_factor(self, factor: float, *, emit_signal: bool = False) -> float:
         factor = float(factor)
@@ -84,10 +100,9 @@ class SliceCanvas(QGraphicsView):
         return float(self._zoom)
 
     def wheelEvent(self, event):
-        angle = event.angleDelta().y()
-        if angle == 0:
+        steps = _wheel_steps(event)
+        if abs(steps) < 1e-6:
             return
-        steps = float(angle) / 120.0
         factor = _ZOOM_BASE ** steps
         self.apply_zoom_factor(factor, emit_signal=True)
         event.accept()
@@ -100,6 +115,21 @@ class SliceCanvas(QGraphicsView):
         super().mouseReleaseEvent(event)
         if event.button() == Qt.LeftButton:
             self._emit_view_window_changed()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self._review_badge_text:
+            return
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        bg, fg = _review_badge_palette(self._review_badge_text, self._review_badge_done)
+        rect = QRectF(14.0, 14.0, 74.0, 30.0)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(bg)
+        painter.drawRoundedRect(rect, 9.0, 9.0)
+        painter.setPen(fg)
+        painter.drawText(rect, Qt.AlignCenter, self._review_badge_text)
+        painter.end()
 
     def normalized_view_window(self) -> tuple[tuple[float, float], tuple[float, float]]:
         scene = self.sceneRect()
@@ -132,6 +162,57 @@ class SliceCanvas(QGraphicsView):
 
     def suspend_view_window_signal(self, enabled: bool) -> None:
         self._suspend_view_window_signal = bool(enabled)
+
+    def set_view_rotation(self, rotation_deg: float, *, emit_signal: bool = False) -> float:
+        target = float(rotation_deg)
+        delta = target - float(self._rotation_deg)
+        if abs(delta) < 1e-6:
+            return float(self._rotation_deg)
+        scene_center = self.mapToScene(self.viewport().rect().center())
+        previous_suspend = self._suspend_view_window_signal
+        if not emit_signal:
+            self._suspend_view_window_signal = True
+        anchor = self.transformationAnchor()
+        self.setTransformationAnchor(QGraphicsView.AnchorViewCenter)
+        self.rotate(delta)
+        self.setTransformationAnchor(anchor)
+        self._rotation_deg = target
+        self.centerOn(scene_center)
+        self._suspend_view_window_signal = previous_suspend
+        if emit_signal:
+            self._emit_view_window_changed()
+        return float(self._rotation_deg)
+
+    def set_normalized_view_window(
+        self,
+        *,
+        center_xy_norm: tuple[float, float],
+        visible_fraction_xy: tuple[float, float],
+        emit_signal: bool = False,
+    ) -> None:
+        scene = self.sceneRect()
+        if scene.width() <= 0.0 or scene.height() <= 0.0:
+            return
+        center = np.clip(np.asarray(center_xy_norm, dtype=np.float32), 0.0, 1.0)
+        visible = np.clip(np.asarray(visible_fraction_xy, dtype=np.float32), 0.05, 1.0)
+        _current_center, current_visible = self.normalized_view_window()
+        target_visible = float(max(float(visible[0]), float(visible[1]), 1e-6))
+        current_visible_max = float(max(float(current_visible[0]), float(current_visible[1]), 1e-6))
+        previous_suspend = self._suspend_view_window_signal
+        if not emit_signal:
+            self._suspend_view_window_signal = True
+        anchor = self.transformationAnchor()
+        self.setTransformationAnchor(QGraphicsView.AnchorViewCenter)
+        scale_factor = current_visible_max / target_visible
+        if abs(scale_factor - 1.0) > 1e-4:
+            self.apply_zoom_factor(scale_factor, emit_signal=False)
+        self.setTransformationAnchor(anchor)
+        scene_x = scene.left() + float(center[0]) * float(scene.width())
+        scene_y = scene.top() + float(center[1]) * float(scene.height())
+        self.centerOn(scene_x, scene_y)
+        self._suspend_view_window_signal = previous_suspend
+        if emit_signal:
+            self._emit_view_window_changed()
 
     def set_mask_opacity(self, opacity: float) -> None:
         """Set mask opacity as a fraction from 0 to 1."""
@@ -211,3 +292,33 @@ class SyncCanvas(SliceCanvas):
         self.horizontalScrollBar().setValue(h)
         self.verticalScrollBar().setValue(v)
         self._ignore = False
+
+
+def _wheel_steps(event) -> float:
+    angle_delta = event.angleDelta().y()
+    if angle_delta:
+        return float(angle_delta) / 120.0
+    pixel_delta = event.pixelDelta().y()
+    if pixel_delta:
+        return float(pixel_delta) / 120.0
+    return 0.0
+
+
+def _review_badge_palette(text: str, done: bool) -> tuple[QColor, QColor]:
+    key = (text or "").strip().upper()
+    if key == "A":
+        bg = QColor(44, 128, 92, 220)
+    elif key == "B":
+        bg = QColor(198, 130, 42, 220)
+    elif key == "C":
+        bg = QColor(184, 72, 58, 220)
+    else:
+        bg = QColor(86, 96, 108, 205)
+    if done:
+        bg = QColor(
+            min(bg.red() + 8, 255),
+            min(bg.green() + 8, 255),
+            min(bg.blue() + 8, 255),
+            230,
+        )
+    return bg, QColor(250, 248, 244)

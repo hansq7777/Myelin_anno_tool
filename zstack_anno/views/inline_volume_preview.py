@@ -9,13 +9,13 @@ from PyQt5.QtGui import QColor, QImage, QPainter, QPen, QPolygonF
 from PyQt5.QtWidgets import QWidget
 
 
-_MAX_IMAGE_SIZE = 720
-_MAX_RAW_POINTS = 36000
-_MAX_MASK_POINTS = 22000
-_MAX_INTERACTIVE_RAW_POINTS = 12000
-_MAX_INTERACTIVE_MASK_POINTS = 7000
-_MAX_VOXELS = 1_500_000
-_TARGET_SHAPE_ZYX = (80, 192, 192)
+_MAX_IMAGE_SIZE = 960
+_MAX_RAW_POINTS = 52000
+_MAX_MASK_POINTS = 30000
+_MAX_INTERACTIVE_RAW_POINTS = 14000
+_MAX_INTERACTIVE_MASK_POINTS = 9000
+_MAX_VOXELS = 2_200_000
+_TARGET_SHAPE_ZYX = (96, 224, 224)
 _ROTATION_SENSITIVITY_DEG = 0.55
 _MAX_PITCH_OFFSET_DEG = 82.0
 _MIN_VIEW_ZOOM = 1.0
@@ -82,6 +82,8 @@ class _PreviewPrepareThread(QThread):
 class InlineVolumePreview(QWidget):
     """Lightweight interactive 3-D preview for the current stack."""
     zoomAdjusted = pyqtSignal(float)
+    viewWindowChanged = pyqtSignal(float, float, float, float)
+    rotationChanged = pyqtSignal(float)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -108,12 +110,15 @@ class InlineVolumePreview(QWidget):
         self._render_request_seq = 0
         self._yaw_offset_deg = 0.0
         self._pitch_offset_deg = 0.0
-        self._drag_active = False
+        self._pan_active = False
+        self._rotate_active = False
         self._drag_last_pos: QPoint | None = None
         self._pending_render_interactive = False
         self._view_zoom = 1.0
         self._view_center_norm = np.array([0.5, 0.5], dtype=np.float32)
         self._display_volume_identity: object | None = None
+        self._review_badge_text = ""
+        self._review_badge_done = False
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._render_pending_preview)
@@ -134,11 +139,14 @@ class InlineVolumePreview(QWidget):
         self._active_render_request_id = None
         self._yaw_offset_deg = 0.0
         self._pitch_offset_deg = 0.0
-        self._drag_active = False
+        self._pan_active = False
+        self._rotate_active = False
         self._drag_last_pos = None
         self._view_zoom = 1.0
         self._view_center_norm = np.array([0.5, 0.5], dtype=np.float32)
         self._display_volume_identity = None
+        self._review_badge_text = ""
+        self._review_badge_done = False
         self._render_timer.stop()
         self.unsetCursor()
         self._status_text = "Enable 3D visualization to render a lightweight preview."
@@ -148,6 +156,11 @@ class InlineVolumePreview(QWidget):
         self._locator_xyz = None
         self.update()
 
+    def set_review_badge(self, text: str, *, done: bool = False) -> None:
+        self._review_badge_text = (text or "").strip().upper()
+        self._review_badge_done = bool(done)
+        self.update()
+
     def set_view_mode(self, mode: str, *, render_if_ready: bool = True) -> None:
         normalized = _normalize_view_mode(mode)
         if normalized == self._view_mode:
@@ -155,6 +168,7 @@ class InlineVolumePreview(QWidget):
         self._view_mode = normalized
         self._yaw_offset_deg = 0.0
         self._pitch_offset_deg = 0.0
+        self.rotationChanged.emit(0.0)
         if render_if_ready and self._volume_key is not None and self._raw_zyx is not None:
             self._apply_render_for_current_view()
         else:
@@ -194,11 +208,12 @@ class InlineVolumePreview(QWidget):
         self._clamp_view_center()
         self._status_text = (
             f"{_view_mode_label(self._view_mode)} view | wheel zoom {self._view_zoom:.2f}x | "
-            "left-drag rotate | G reset."
+            "left-drag pan | right-drag rotate | G reset."
         )
         self.update()
         if emit_signal:
             self.zoomAdjusted.emit(new_zoom / max(old_zoom, 1e-9))
+            self._emit_view_window_changed()
         return float(self._view_zoom)
 
     def set_planar_view_window(
@@ -225,6 +240,7 @@ class InlineVolumePreview(QWidget):
     def reset_view_rotation(self) -> None:
         self._yaw_offset_deg = 0.0
         self._pitch_offset_deg = 0.0
+        self.rotationChanged.emit(0.0)
         self._request_preview_render(interactive=False, delay_ms=0)
 
     def set_locator(self, x: int, y: int, z: int, spacing_xyz: tuple[float, float, float]) -> None:
@@ -277,7 +293,24 @@ class InlineVolumePreview(QWidget):
                 _MAX_PITCH_OFFSET_DEG,
             )
         )
+        self.rotationChanged.emit(float(self._yaw_offset_deg))
         self._request_preview_render(interactive=interactive, delay_ms=0 if not interactive else 12)
+
+    def pan_by_drag_delta(self, dx: float, dy: float) -> None:
+        target = self._image_target_rect(self._content_rect())
+        width = max(target.width(), 1e-6)
+        height = max(target.height(), 1e-6)
+        center = np.asarray(self._view_center_norm, dtype=np.float32).copy()
+        center[0] -= float(dx) / width
+        center[1] -= float(dy) / height
+        self._view_center_norm = center
+        self._clamp_view_center()
+        self._status_text = (
+            f"{_view_mode_label(self._view_mode)} view | wheel zoom {self._view_zoom:.2f}x | "
+            "left-drag pan | right-drag rotate | G reset."
+        )
+        self.update()
+        self._emit_view_window_changed()
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
@@ -303,12 +336,23 @@ class InlineVolumePreview(QWidget):
             Qt.AlignLeft | Qt.AlignVCenter,
             self._status_text,
         )
+        self._draw_review_badge(painter)
         painter.end()
 
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton and self._prepared_data is not None:
+        if self._prepared_data is None:
+            super().mousePressEvent(event)
+            return
+        if self._is_secondary_button_event(event):
             self.setFocus(Qt.MouseFocusReason)
-            self._drag_active = True
+            self._rotate_active = True
+            self._drag_last_pos = event.pos()
+            self.setCursor(Qt.SizeAllCursor)
+            event.accept()
+            return
+        if event.button() == Qt.LeftButton:
+            self.setFocus(Qt.MouseFocusReason)
+            self._pan_active = True
             self._drag_last_pos = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
@@ -316,7 +360,14 @@ class InlineVolumePreview(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
-        if self._drag_active and self._drag_last_pos is not None and self._prepared_data is not None:
+        if self._pan_active and self._drag_last_pos is not None and self._prepared_data is not None:
+            dx = event.pos().x() - self._drag_last_pos.x()
+            dy = event.pos().y() - self._drag_last_pos.y()
+            self._drag_last_pos = event.pos()
+            self.pan_by_drag_delta(dx, dy)
+            event.accept()
+            return
+        if self._rotate_active and self._drag_last_pos is not None and self._prepared_data is not None:
             dx = event.pos().x() - self._drag_last_pos.x()
             dy = event.pos().y() - self._drag_last_pos.y()
             self._drag_last_pos = event.pos()
@@ -326,8 +377,17 @@ class InlineVolumePreview(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton and self._drag_active:
-            self._drag_active = False
+        if event.button() == Qt.LeftButton and self._pan_active:
+            self._pan_active = False
+            self._drag_last_pos = None
+            if self._prepared_data is not None:
+                self.setCursor(Qt.OpenHandCursor)
+            else:
+                self.unsetCursor()
+            event.accept()
+            return
+        if (event.button() == Qt.RightButton or (event.button() == Qt.LeftButton and self._rotate_active)) and self._rotate_active:
+            self._rotate_active = False
             self._drag_last_pos = None
             if self._prepared_data is not None:
                 self.setCursor(Qt.OpenHandCursor)
@@ -354,11 +414,11 @@ class InlineVolumePreview(QWidget):
         if not viewport.contains(pos):
             super().wheelEvent(event)
             return
-        angle = event.angleDelta().y()
-        if angle == 0:
+        wheel_steps = _wheel_steps(event)
+        if abs(wheel_steps) < 1e-6:
             event.accept()
             return
-        factor = _WHEEL_ZOOM_FACTOR if angle > 0 else (1.0 / _WHEEL_ZOOM_FACTOR)
+        factor = _WHEEL_ZOOM_FACTOR ** wheel_steps
         old_target = self._image_target_rect(viewport)
         anchor_norm = (
             (pos.x() - old_target.left()) / max(old_target.width(), 1e-6),
@@ -368,7 +428,8 @@ class InlineVolumePreview(QWidget):
         event.accept()
 
     def focusOutEvent(self, event) -> None:
-        self._drag_active = False
+        self._pan_active = False
+        self._rotate_active = False
         self._drag_last_pos = None
         if self._prepared_data is not None:
             self.setCursor(Qt.OpenHandCursor)
@@ -390,7 +451,7 @@ class InlineVolumePreview(QWidget):
             return
         self._prepared_data = cached
         self._request_preview_render(interactive=False, delay_ms=0)
-        if not self._drag_active:
+        if not self._has_active_pointer_interaction():
             self.setCursor(Qt.OpenHandCursor)
 
     def _request_background_prepare(self, render_key: object) -> None:
@@ -438,7 +499,7 @@ class InlineVolumePreview(QWidget):
         self._remember_prepared_cache(render_key, prepared)
         if self._volume_key is not None and render_key == self._volume_key:
             self._prepared_data = prepared
-            if not self._drag_active:
+            if not self._has_active_pointer_interaction():
                 self.setCursor(Qt.OpenHandCursor)
             self._request_preview_render(interactive=False, delay_ms=0)
 
@@ -509,9 +570,30 @@ class InlineVolumePreview(QWidget):
         hint = "interactive" if interactive else "full"
         self._status_text = (
             f"{_view_mode_label(self._view_mode)} view | wheel zoom {self._view_zoom:.2f}x | "
-            f"left-drag rotate | G reset | {hint} preview."
+            f"left-drag pan | right-drag rotate | G reset | {hint} preview."
         )
         self.update()
+
+    def normalized_view_window(self) -> tuple[tuple[float, float], tuple[float, float]]:
+        zoom = max(_MIN_VIEW_ZOOM, float(self._view_zoom))
+        frac = float(np.clip(1.0 / zoom, 0.05, 1.0))
+        center = np.clip(np.asarray(self._view_center_norm, dtype=np.float32), 0.0, 1.0)
+        return (float(center[0]), float(center[1])), (frac, frac)
+
+    def _emit_view_window_changed(self) -> None:
+        center, frac = self.normalized_view_window()
+        self.viewWindowChanged.emit(center[0], center[1], frac[0], frac[1])
+
+    def _has_active_pointer_interaction(self) -> bool:
+        return bool(self._pan_active or self._rotate_active)
+
+    @staticmethod
+    def _is_secondary_button_event(event) -> bool:
+        if event.button() == Qt.RightButton:
+            return True
+        if event.button() != Qt.LeftButton:
+            return False
+        return bool(event.modifiers() & Qt.ControlModifier)
 
     def _content_rect(self) -> QRectF:
         margin = 12.0
@@ -576,6 +658,18 @@ class InlineVolumePreview(QWidget):
         painter.drawEllipse(mapped, radius, radius)
         painter.drawLine(QPointF(mapped.x() - 8.0, mapped.y()), QPointF(mapped.x() + 8.0, mapped.y()))
         painter.drawLine(QPointF(mapped.x(), mapped.y() - 8.0), QPointF(mapped.x(), mapped.y() + 8.0))
+
+    def _draw_review_badge(self, painter: QPainter) -> None:
+        if not self._review_badge_text:
+            return
+        text = self._review_badge_text
+        bg, fg = _review_badge_palette(text, self._review_badge_done)
+        rect = QRectF(14.0, 14.0, 74.0, 30.0)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(bg)
+        painter.drawRoundedRect(rect, 9.0, 9.0)
+        painter.setPen(fg)
+        painter.drawText(rect, Qt.AlignCenter, text)
 
 
 def _build_preview_image(
@@ -846,10 +940,11 @@ def _select_raw_points(
         return np.empty((0, 3), dtype=np.float32), np.empty((0,), dtype=np.float32)
     norm = np.clip((arr - lo) / (hi - lo), 0.0, 1.0)
     structural = _normalized_gradient_score(arr)
-    score = np.maximum(norm, 0.68 * norm + 0.42 * structural)
-    candidates = np.flatnonzero(score >= 0.1)
+    local_contrast = _normalized_local_contrast_score(arr)
+    score = np.maximum(norm, 0.62 * norm + 0.28 * structural + 0.26 * local_contrast)
+    candidates = np.flatnonzero(score >= 0.085)
     if candidates.size == 0:
-        candidates = np.flatnonzero(norm >= 0.08)
+        candidates = np.flatnonzero(norm >= 0.07)
     if candidates.size == 0:
         return np.empty((0, 3), dtype=np.float32), np.empty((0,), dtype=np.float32)
     flat_score = score.ravel()
@@ -860,8 +955,8 @@ def _select_raw_points(
         values,
         norm.shape,
         _MAX_RAW_POINTS,
-        preferred_bins=(6, 12, 12),
-        per_cell_quota=2,
+        preferred_bins=(6, 10, 10),
+        per_cell_quota=3,
     )
     coords_zyx = coords_zyx[keep_idx].astype(np.float32)
     values = values[keep_idx]
@@ -885,8 +980,8 @@ def _select_mask_points(
         np.ones((coords_zyx.shape[0],), dtype=np.float32),
         mask.shape,
         _MAX_MASK_POINTS,
-        preferred_bins=(6, 12, 12),
-        per_cell_quota=3,
+        preferred_bins=(8, 14, 14),
+        per_cell_quota=4,
     )
     coords_zyx = coords_zyx[keep_idx].astype(np.float32)
     return _coords_zyx_to_xyz(coords_zyx.astype(np.float32), spacing_xyz)
@@ -908,6 +1003,16 @@ def _limit_point_cloud(
     return limited_points, limited_intensity
 
 
+def _wheel_steps(event) -> float:
+    angle_delta = event.angleDelta().y()
+    if angle_delta:
+        return float(angle_delta) / 120.0
+    pixel_delta = event.pixelDelta().y()
+    if pixel_delta:
+        return float(pixel_delta) / 120.0
+    return 0.0
+
+
 def _normalized_gradient_score(arr: np.ndarray) -> np.ndarray:
     if arr.size == 0 or min(arr.shape) <= 1:
         return np.zeros_like(arr, dtype=np.float32)
@@ -918,6 +1023,27 @@ def _normalized_gradient_score(arr: np.ndarray) -> np.ndarray:
     if hi <= lo:
         return np.zeros_like(arr, dtype=np.float32)
     return np.clip((grad - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+
+
+def _normalized_local_contrast_score(arr: np.ndarray) -> np.ndarray:
+    if arr.size == 0:
+        return np.zeros_like(arr, dtype=np.float32)
+    padded = np.pad(arr.astype(np.float32), 1, mode="edge")
+    local_mean = (
+        padded[1:-1, 1:-1, 1:-1]
+        + padded[:-2, 1:-1, 1:-1]
+        + padded[2:, 1:-1, 1:-1]
+        + padded[1:-1, :-2, 1:-1]
+        + padded[1:-1, 2:, 1:-1]
+        + padded[1:-1, 1:-1, :-2]
+        + padded[1:-1, 1:-1, 2:]
+    ) / 7.0
+    contrast = np.abs(arr.astype(np.float32) - local_mean).astype(np.float32)
+    lo = float(np.percentile(contrast, 55.0))
+    hi = float(np.percentile(contrast, 99.6))
+    if hi <= lo:
+        return np.zeros_like(arr, dtype=np.float32)
+    return np.clip((contrast - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
 
 
 def _surface_mask_zyx(mask: np.ndarray) -> np.ndarray:
@@ -959,6 +1085,26 @@ def _select_indices_with_spatial_coverage(
     counts = np.zeros((num_cells,), dtype=np.int16)
     kept_positions: list[int] = []
     used = np.zeros((order.shape[0],), dtype=bool)
+
+    coarse_bins = np.maximum(1, np.minimum(np.maximum(1, bins // 2), shape))
+    coarse_cell_z = np.minimum((coords[:, 0] * coarse_bins[0]) // shape[0], coarse_bins[0] - 1)
+    coarse_cell_y = np.minimum((coords[:, 1] * coarse_bins[1]) // shape[1], coarse_bins[1] - 1)
+    coarse_cell_x = np.minimum((coords[:, 2] * coarse_bins[2]) // shape[2], coarse_bins[2] - 1)
+    coarse_num_cells = int(coarse_bins[0] * coarse_bins[1] * coarse_bins[2])
+    coarse_cell_ids = (
+        coarse_cell_z * coarse_bins[1] * coarse_bins[2] + coarse_cell_y * coarse_bins[2] + coarse_cell_x
+    ).astype(np.int32)
+    coarse_counts = np.zeros((coarse_num_cells,), dtype=np.int16)
+
+    # First pass: make sure distant structures keep at least one representative point.
+    for pos, cell_id in enumerate(coarse_cell_ids):
+        if used[pos] or coarse_counts[cell_id] >= 1:
+            continue
+        kept_positions.append(pos)
+        used[pos] = True
+        coarse_counts[cell_id] += 1
+        if len(kept_positions) >= max_points:
+            return order[np.asarray(kept_positions, dtype=np.int32)]
 
     for quota in range(1, max(1, int(per_cell_quota)) + 1):
         for pos, cell_id in enumerate(cell_ids):
@@ -1025,21 +1171,28 @@ def _draw_raw_points(
 ) -> None:
     if raw_norm_xy.size == 0 or intensity.size == 0:
         return
-    bins = np.clip(np.floor(intensity * 5.0).astype(np.int32), 0, 4)
-    for bucket in range(5):
+    bins = np.clip(np.floor(intensity * 6.0).astype(np.int32), 0, 5)
+    for bucket in range(6):
         idx = np.flatnonzero(bins == bucket)
         if idx.size == 0:
             continue
-        alpha = 45 + bucket * 35
-        shade = 70 + bucket * 38
-        painter.setPen(QPen(QColor(shade, shade, shade, min(alpha, 220)), 2.0))
+        alpha = 42 + bucket * 32
+        shade = 66 + bucket * 30
+        pen_width = 1.8 if bucket < 3 else 2.2
+        painter.setPen(QPen(QColor(shade, shade + 4, shade + 8, min(alpha, 228)), pen_width))
         painter.drawPoints(QPolygonF([_map_norm_point(raw_norm_xy[i], width, height) for i in idx]))
+    hot_idx = np.flatnonzero(intensity >= 0.82)
+    if hot_idx.size:
+        painter.setPen(QPen(QColor(244, 242, 236, 210), 1.4))
+        painter.drawPoints(QPolygonF([_map_norm_point(raw_norm_xy[i], width, height) for i in hot_idx]))
 
 
 def _draw_mask_points(painter: QPainter, mask_norm_xy: np.ndarray, width: int, height: int) -> None:
     if mask_norm_xy.size == 0:
         return
-    painter.setPen(QPen(QColor(214, 74, 62, 165), 2.2))
+    painter.setPen(QPen(QColor(240, 198, 78, 55), 3.6))
+    painter.drawPoints(QPolygonF([_map_norm_point(point, width, height) for point in mask_norm_xy]))
+    painter.setPen(QPen(QColor(214, 74, 62, 178), 2.2))
     painter.drawPoints(QPolygonF([_map_norm_point(point, width, height) for point in mask_norm_xy]))
 
 
@@ -1068,3 +1221,23 @@ def _view_mode_label(mode: str) -> str:
         if key == normalized:
             return label
     return "Oblique"
+
+
+def _review_badge_palette(text: str, done: bool) -> tuple[QColor, QColor]:
+    key = (text or "").strip().upper()
+    if key == "A":
+        bg = QColor(44, 128, 92, 220)
+    elif key == "B":
+        bg = QColor(198, 130, 42, 220)
+    elif key == "C":
+        bg = QColor(184, 72, 58, 220)
+    else:
+        bg = QColor(86, 96, 108, 205)
+    if done:
+        bg = QColor(
+            min(bg.red() + 8, 255),
+            min(bg.green() + 8, 255),
+            min(bg.blue() + 8, 255),
+            230,
+        )
+    return bg, QColor(250, 248, 244)

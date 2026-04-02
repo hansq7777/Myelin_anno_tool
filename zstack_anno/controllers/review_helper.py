@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import csv
+import math
 import os
 import random
 import re
@@ -33,6 +34,9 @@ TRACKER_BASE_COLUMNS = [
     "source_group",
     "pair_key",
     "pair_status",
+    "review_queue_rank",
+    "inference_foreground_voxels",
+    "review_priority_weight",
 ]
 
 TRACKER_REVIEW_COLUMNS = [
@@ -69,7 +73,7 @@ class ReviewMixin:
         self._review_filter_updating: bool = False
         self._review_skipped_missing_paths: int = 0
         self._review_skipped_missing_files: int = 0
-        self._review_random_enabled: bool = True
+        self._review_random_enabled: bool = False
         self._review_random_seen_indices: set[int] = set()
         self._review_random_history: list[int] = []
         self._review_rng = random.Random()
@@ -110,9 +114,17 @@ class ReviewMixin:
             return
         if not os.path.splitext(tracker_path)[1]:
             tracker_path += ".xlsx"
+        import_tracker_path = self._review_choose_import_tracker_path(raw_dir, tracker_path)
+        if import_tracker_path is None:
+            return
 
         try:
-            rows, stats = self._review_build_tracker_rows(raw_dir, pred_dir, tracker_path)
+            rows, stats = self._review_build_tracker_rows(
+                raw_dir,
+                pred_dir,
+                tracker_path,
+                import_tracker_path=import_tracker_path,
+            )
             self._review_write_tracker(tracker_path, TRACKER_COLUMN_ORDER, rows)
         except Exception as exc:
             QMessageBox.warning(self, "Build Tracker", f"Failed to build tracker:\n{exc}")
@@ -124,6 +136,7 @@ class ReviewMixin:
             "Build Tracker",
             (
                 f"Tracker updated: {tracker_path}\n"
+                f"Imported review fields: {import_tracker_path or 'none'}\n"
                 f"Matched: {stats['matched']}\n"
                 f"Raw only: {stats['raw_only']}\n"
                 f"Prediction only: {stats['pred_only']}\n"
@@ -131,6 +144,45 @@ class ReviewMixin:
                 f"Prediction duplicates: {stats['pred_duplicates']}"
             ),
         )
+
+    def _review_choose_import_tracker_path(
+        self: "MainController",
+        raw_dir: str,
+        tracker_path: str,
+    ) -> str | None:
+        default_import = ""
+        if self._review_tracker_path and os.path.exists(self._review_tracker_path):
+            default_import = self._review_tracker_path
+        elif os.path.exists(tracker_path):
+            default_import = tracker_path
+        else:
+            default_import = raw_dir
+
+        ret = QMessageBox.question(
+            self,
+            "Import Existing Review Data",
+            (
+                "Import review grades/completed flags from an existing tracker?\n\n"
+                "Yes: choose a tracker file to import from\n"
+                "No: build a fresh tracker without importing old review fields\n"
+                "Cancel: abort"
+            ),
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes if self._review_tracker_path or os.path.exists(tracker_path) else QMessageBox.No,
+        )
+        if ret == QMessageBox.Cancel:
+            return None
+        if ret == QMessageBox.No:
+            return ""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Tracker to Import Review Fields",
+            default_import,
+            "Tracker Files (*.xlsx *.csv);;Excel Files (*.xlsx);;CSV Files (*.csv)",
+        )
+        if not path:
+            return None
+        return path
 
     def _review_prev_stack(self: "MainController") -> None:
         if not self._review_filtered_indices:
@@ -163,6 +215,44 @@ class ReviewMixin:
             self._review_load_filtered_pos(pos, force=True)
             return
         self._review_load_filtered_pos(self._review_current_filtered_pos + 1)
+
+    def _review_next_unfinished_stack(self: "MainController") -> None:
+        if not self._review_items:
+            return
+        start_index = self._review_current_item_index
+        ordered_indices = list(range(len(self._review_items)))
+        if start_index in ordered_indices:
+            start_pos = ordered_indices.index(start_index)
+            search_order = ordered_indices[start_pos + 1 :] + ordered_indices[: start_pos + 1]
+        else:
+            search_order = ordered_indices
+        target_index = None
+        for item_index in search_order:
+            item = self._review_items[item_index]
+            if not bool(item.get("completed")):
+                target_index = item_index
+                break
+        if target_index is None:
+            QMessageBox.information(
+                self,
+                "Review Queue",
+                "No unfinished zstacks remain in the current tracker.",
+            )
+            return
+        self._review_set_filter("All")
+        self._review_rebuild_filtered_indices(load_item=False)
+        if target_index not in self._review_filtered_indices:
+            QMessageBox.information(
+                self,
+                "Review Queue",
+                "The next unfinished zstack is not available under the current filter.",
+            )
+            return
+        pos = self._review_filtered_indices.index(target_index)
+        self._review_load_filtered_pos(pos, force=True)
+
+    def _review_next_unreviewed_stack(self: "MainController") -> None:
+        self._review_next_unfinished_stack()
 
     def _review_mark_a(self: "MainController") -> None:
         self._review_set_grade("A", move_next=True)
@@ -358,6 +448,9 @@ class ReviewMixin:
         self._review_rebuild_header_index()
         self._review_normalize_table_rows()
         self._review_ensure_columns()
+        reshuffled = self._review_maybe_reshuffle_loaded_tracker()
+        if reshuffled is None:
+            return
         self._review_reset_random_state()
         self._review_refresh_items()
         self._set_review_controls_enabled(bool(self._review_items))
@@ -392,9 +485,55 @@ class ReviewMixin:
                 f"missing paths: {self._review_skipped_missing_paths} | "
                 f"missing files: {self._review_skipped_missing_files} | "
                 f"start filter: {default_filter} | "
-                f"selection: random-unfinished"
+                f"selection: {'reshuffled existing queue' if reshuffled else 'fixed weighted queue'}"
             )
         )
+
+    def _review_maybe_reshuffle_loaded_tracker(self: "MainController") -> bool | None:
+        if not self._review_table_rows:
+            return False
+        ret = QMessageBox.question(
+            self,
+            "Reshuffle Tracker Order",
+            (
+                "Reshuffle this tracker's queue order while loading?\n\n"
+                "Yes: keep existing A/B/C-reviewed stacks at the front, and randomly reorder the rest\n"
+                "No: keep the current queue order\n"
+                "Cancel: abort loading"
+            ),
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.No,
+        )
+        if ret == QMessageBox.Cancel:
+            return None
+        if ret != QMessageBox.Yes:
+            return False
+        self._review_reshuffle_loaded_tracker_queue()
+        self._review_save_tracker()
+        return True
+
+    def _review_reshuffle_loaded_tracker_queue(self: "MainController") -> None:
+        ranked_rows: list[tuple[tuple[int, int], dict[str, object]]] = []
+        pending_rows: list[dict[str, object]] = []
+
+        for idx, row in enumerate(self._review_table_rows):
+            zstack_id = str(row.get("zstack_id", "")).strip()
+            if not zstack_id:
+                row["review_queue_rank"] = ""
+                continue
+            grade = normalize_review_grade(row.get("review_grade"))
+            if grade in {"A", "B", "C"}:
+                current_rank = self._review_parse_int(row.get("review_queue_rank")) or (idx + 1)
+                ranked_rows.append(((current_rank, idx), row))
+            else:
+                pending_rows.append(row)
+
+        ranked_rows.sort(key=lambda item: item[0])
+        self._review_rng.shuffle(pending_rows)
+
+        ordered_rows = [row for _key, row in ranked_rows] + pending_rows
+        for rank, row in enumerate(ordered_rows, start=1):
+            row["review_queue_rank"] = rank
 
     def _review_read_tracker(self: "MainController", path: str) -> tuple[list[str], list[dict[str, object]], str]:
         ext = os.path.splitext(path)[1].lower()
@@ -525,16 +664,18 @@ class ReviewMixin:
                     "completed_at": completed_at,
                     "corrected_path": corrected_path if corrected_path and os.path.exists(corrected_path) else "",
                     "source_group": self._review_cell(row, "source_group") or "",
+                    "queue_rank": self._review_parse_int(self._review_cell(row, "review_queue_rank")) or row,
                 }
             )
 
+        items.sort(key=lambda item: (item.get("queue_rank", 10**9), int(item.get("row", 0))))
         self._review_items = items
         self._review_skipped_missing_paths = skipped_missing_paths
         self._review_skipped_missing_files = skipped_missing_files
 
     def _review_ensure_columns(self: "MainController") -> None:
         added = False
-        for name in TRACKER_REVIEW_COLUMNS:
+        for name in TRACKER_COLUMN_ORDER:
             if name not in self._review_headers:
                 self._review_header_names.append(name)
                 self._review_rebuild_header_index()
@@ -546,7 +687,12 @@ class ReviewMixin:
 
     # --------- tracker build helpers ---------
     def _review_build_tracker_rows(
-        self: "MainController", raw_dir: str, pred_dir: str, tracker_path: str
+        self: "MainController",
+        raw_dir: str,
+        pred_dir: str,
+        tracker_path: str,
+        *,
+        import_tracker_path: str = "",
     ) -> tuple[list[dict[str, object]], dict[str, int]]:
         raw_files = self._review_collect_stack_files(raw_dir, allow_czi=True)
         pred_files = self._review_collect_stack_files(pred_dir, allow_czi=False)
@@ -580,8 +726,14 @@ class ReviewMixin:
         raw_only_keys = sorted(raw_keys - pred_keys)
         pred_only_keys = sorted(pred_keys - raw_keys)
 
-        existing = self._review_load_existing_rows_by_id(tracker_path)
+        existing = self._review_load_existing_rows_by_id(import_tracker_path or tracker_path)
         rows: list[dict[str, object]] = []
+        pred_voxel_counts: dict[str, int] = {}
+
+        def pred_voxels(path: str) -> int:
+            if path not in pred_voxel_counts:
+                pred_voxel_counts[path] = self._review_prediction_foreground_voxels(path)
+            return pred_voxel_counts[path]
 
         for key in matched_keys:
             row = self._review_new_tracker_row(
@@ -590,8 +742,9 @@ class ReviewMixin:
                 pred_path=pred_map[key],
                 source_group=self._review_guess_source_group(raw_dir, raw_map[key]),
                 pair_status="matched",
+                inference_foreground_voxels=pred_voxels(pred_map[key]),
             )
-            self._review_merge_review_fields(row, existing.get(key))
+            self._review_merge_existing_tracker_fields(row, existing.get(key))
             rows.append(row)
 
         for key in raw_only_keys:
@@ -602,7 +755,7 @@ class ReviewMixin:
                 source_group=self._review_guess_source_group(raw_dir, raw_map[key]),
                 pair_status="raw_only",
             )
-            self._review_merge_review_fields(row, existing.get(key))
+            self._review_merge_existing_tracker_fields(row, existing.get(key))
             rows.append(row)
 
         for key in pred_only_keys:
@@ -612,9 +765,12 @@ class ReviewMixin:
                 pred_path=pred_map[key],
                 source_group="",
                 pair_status="pred_only",
+                inference_foreground_voxels=pred_voxels(pred_map[key]),
             )
-            self._review_merge_review_fields(row, existing.get(key))
+            self._review_merge_existing_tracker_fields(row, existing.get(key))
             rows.append(row)
+
+        rows = self._review_assign_queue_order(rows)
 
         stats = {
             "matched": len(matched_keys),
@@ -711,6 +867,7 @@ class ReviewMixin:
         pred_path: str,
         source_group: str,
         pair_status: str,
+        inference_foreground_voxels: int | None = None,
     ) -> dict[str, object]:
         row = {name: "" for name in TRACKER_COLUMN_ORDER}
         row["zstack_id"] = zstack_id
@@ -719,16 +876,92 @@ class ReviewMixin:
         row["source_group"] = source_group
         row["pair_key"] = zstack_id
         row["pair_status"] = pair_status
+        if inference_foreground_voxels is not None:
+            row["inference_foreground_voxels"] = int(inference_foreground_voxels)
         return row
 
     @staticmethod
-    def _review_merge_review_fields(row: dict[str, object], old_row: dict[str, object] | None) -> None:
+    def _review_merge_existing_tracker_fields(row: dict[str, object], old_row: dict[str, object] | None) -> None:
         if not old_row:
             return
         for name in TRACKER_REVIEW_COLUMNS:
             value = old_row.get(name, "")
             if value not in (None, ""):
                 row[name] = value
+
+    @staticmethod
+    def _review_prediction_foreground_voxels(path: str) -> int:
+        try:
+            arr = tifffile.imread(path)
+        except Exception:
+            return 0
+        return int((arr > 0).sum())
+
+    @staticmethod
+    def _review_parse_int(value: object) -> int | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return int(float(text))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _review_priority_weight_for_row(row: dict[str, object]) -> float:
+        status = str(row.get("pair_status", "")).strip().lower()
+        voxels = ReviewMixin._review_parse_int(row.get("inference_foreground_voxels")) or 0
+        if status == "matched":
+            return float(1.0 / (1.0 + max(0.0, math.log10(float(voxels) + 10.0))))
+        if status == "pred_only":
+            return float(0.22 / (1.0 + max(0.0, math.log10(float(voxels) + 10.0))))
+        return 0.12
+
+    def _review_assign_queue_order(self: "MainController", rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        ranked_rows: list[tuple[int, dict[str, object]]] = []
+        pending_rows: list[dict[str, object]] = []
+        used_ranks: set[int] = set()
+
+        for row in rows:
+            weight = self._review_priority_weight_for_row(row)
+            row["review_priority_weight"] = f"{weight:.6f}"
+            rank = self._review_parse_int(row.get("review_queue_rank"))
+            if rank is not None and rank > 0 and rank not in used_ranks:
+                used_ranks.add(rank)
+                row["review_queue_rank"] = rank
+                ranked_rows.append((rank, row))
+            else:
+                pending_rows.append(row)
+
+        weighted_pending: list[tuple[float, str, dict[str, object]]] = []
+        for row in pending_rows:
+            status = str(row.get("pair_status", "")).strip().lower()
+            voxels = self._review_parse_int(row.get("inference_foreground_voxels")) or 0
+            if status == "matched":
+                status_penalty = 0.0
+                size_score = math.log10(float(voxels) + 10.0)
+            elif status == "pred_only":
+                status_penalty = 2.5
+                size_score = math.log10(float(voxels) + 10.0)
+            else:
+                status_penalty = 4.0
+                size_score = 1.0
+            jitter = self._review_rng.random() * 0.75
+            weighted_key = status_penalty + size_score + jitter
+            weighted_pending.append((weighted_key, str(row.get("zstack_id", "")), row))
+        weighted_pending.sort(key=lambda item: (item[0], item[1]))
+
+        next_rank = 1
+        for _weighted_key, _zstack_id, row in weighted_pending:
+            while next_rank in used_ranks:
+                next_rank += 1
+            row["review_queue_rank"] = next_rank
+            used_ranks.add(next_rank)
+            ranked_rows.append((next_rank, row))
+            next_rank += 1
+
+        ranked_rows.sort(key=lambda item: (item[0], str(item[1].get("zstack_id", ""))))
+        return [row for _rank, row in ranked_rows]
 
     # --------- row actions ---------
     def _review_set_grade(self: "MainController", grade: str, move_next: bool) -> None:
@@ -754,7 +987,17 @@ class ReviewMixin:
 
         if move_next:
             self._review_rebuild_filtered_indices(load_item=False)
-            self._review_next_stack()
+            if not self._review_filtered_indices:
+                return
+            mode = self.review_filter_combo.currentText() if hasattr(self, "review_filter_combo") else "All"
+            if mode == "Unreviewed":
+                target_pos = min(max(self._review_current_filtered_pos, 0), len(self._review_filtered_indices) - 1)
+            else:
+                target_pos = min(
+                    max(self._review_current_filtered_pos + 1, 0),
+                    len(self._review_filtered_indices) - 1,
+                )
+            self._review_load_filtered_pos(target_pos, force=True)
             return
 
         self._review_rebuild_filtered_indices(load_item=False)
@@ -815,12 +1058,7 @@ class ReviewMixin:
             self._review_update_info_label()
 
     def _review_should_random_select(self: "MainController") -> bool:
-        if not self._review_random_enabled:
-            return False
-        if not hasattr(self, "review_filter_combo"):
-            return True
-        mode = self.review_filter_combo.currentText()
-        return mode in {"All", "Unreviewed"}
+        return False
 
     def _review_reset_random_state(self: "MainController") -> None:
         self._review_random_seen_indices.clear()
@@ -912,6 +1150,7 @@ class ReviewMixin:
         widgets = [
             "review_prev_stack_btn",
             "review_next_stack_btn",
+            "review_next_unreviewed_btn",
             "review_filter_combo",
             "review_grade_combo",
             "review_mark_a_btn",
@@ -947,6 +1186,7 @@ class ReviewMixin:
         filtered = len(self._review_filtered_indices)
         if total == 0:
             self.review_info_label.setText("Review: tracker not loaded")
+            self._review_sync_view_badges()
             return
         counts = {"A": 0, "B": 0, "C": 0, "U": 0, "DONE": 0}
         for item in self._review_items:
@@ -966,6 +1206,7 @@ class ReviewMixin:
                     f"Done:{counts['DONE']}"
                 )
             )
+            self._review_sync_view_badges()
             return
 
         current_item = self._review_items[self._review_current_item_index]
@@ -978,6 +1219,22 @@ class ReviewMixin:
                 f"A:{counts['A']} B:{counts['B']} C:{counts['C']} U:{counts['U']} Done:{counts['DONE']}"
             )
         )
+        self._review_sync_view_badges()
+
+    def _review_sync_view_badges(self: "MainController") -> None:
+        badge_text = ""
+        badge_done = False
+        current_item = self._review_current_item()
+        model_path = os.path.normpath(self.model.path or "") if getattr(self.model, "path", None) else ""
+        if current_item is not None and model_path:
+            item_raw = os.path.normpath(current_item.get("raw_path") or "")
+            if item_raw == model_path:
+                badge_text = normalize_review_grade(current_item.get("grade")) or "U"
+                badge_done = bool(current_item.get("completed"))
+        if hasattr(self, "canvas"):
+            self.canvas.set_review_badge(badge_text, done=badge_done)
+        if hasattr(self, "inline_volume_preview"):
+            self.inline_volume_preview.set_review_badge(badge_text, done=badge_done)
 
     def _review_pick_initial_filter(self: "MainController") -> str:
         has_pending_unreviewed = any(

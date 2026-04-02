@@ -111,6 +111,8 @@ class MainController(
         self._delete_band.hide()
         self._inline_volume_enabled = False
         self.inline_volume_preview.zoomAdjusted.connect(self._sync_canvas_zoom_from_inline)
+        self.inline_volume_preview.viewWindowChanged.connect(self._sync_canvas_view_window_from_inline)
+        self.inline_volume_preview.rotationChanged.connect(self._sync_canvas_rotation_from_inline)
         self._inline_preview_timer = QTimer(self)
         self._inline_preview_timer.setSingleShot(True)
         self._inline_preview_timer.timeout.connect(self._refresh_inline_volume_preview)
@@ -158,6 +160,8 @@ class MainController(
         self.review_prev_stack_btn.clicked.connect(self._review_prev_stack)
         self.review_next_stack_btn = QPushButton("Next Stack")
         self.review_next_stack_btn.clicked.connect(self._review_next_stack)
+        self.review_next_unreviewed_btn = QPushButton("Next Unfinished")
+        self.review_next_unreviewed_btn.clicked.connect(self._review_next_unfinished_stack)
         self.review_filter_combo = QComboBox()
         self.review_filter_combo.addItems(["All", "Unreviewed", "A", "B", "C"])
         self.review_filter_combo.currentTextChanged.connect(self._review_on_filter_changed)
@@ -194,6 +198,7 @@ class MainController(
         review_layout.addWidget(self.review_open_btn)
         review_layout.addWidget(self.review_prev_stack_btn)
         review_layout.addWidget(self.review_next_stack_btn)
+        review_layout.addWidget(self.review_next_unreviewed_btn)
         review_layout.addWidget(QLabel("Filter"))
         review_layout.addWidget(self.review_filter_combo)
         review_layout.addWidget(QLabel("Grade"))
@@ -533,6 +538,9 @@ class MainController(
         review_next_act = review_menu.addAction("Next Stack")
         review_next_act.triggered.connect(self._review_next_stack)
         review_next_act.setShortcuts(["Alt+."])
+        review_next_unreviewed_act = review_menu.addAction("Next Unfinished Stack")
+        review_next_unreviewed_act.triggered.connect(self._review_next_unfinished_stack)
+        review_next_unreviewed_act.setShortcuts(["Alt+/"])
         mark_a_act = review_menu.addAction("Mark A")
         mark_a_act.triggered.connect(self._review_mark_a)
         mark_a_act.setShortcuts(["Alt+1"])
@@ -598,6 +606,8 @@ class MainController(
         if hasattr(self, "info_label"):
             self.info_label.setText(info)
         self._update_file_labels()
+        if hasattr(self, "_review_sync_view_badges"):
+            self._review_sync_view_badges()
         self._schedule_inline_volume_preview_refresh()
         self._refresh_inline_volume_locator()
 
@@ -629,6 +639,7 @@ class MainController(
             self._inline_preview_timer.stop()
             self.inline_volume_preview.clear_preview()
             self._inline_preview_volume_signature = None
+            self.canvas.set_view_rotation(0.0, emit_signal=False)
             self.center_splitter.setSizes([0, max(1, self.center_splitter.width())])
             return
         total = max(sum(self.center_splitter.sizes()), self.center_splitter.width(), 960)
@@ -639,6 +650,8 @@ class MainController(
     def _on_inline_view_changed(self, _index: int) -> None:
         if not getattr(self, "_inline_volume_enabled", False):
             return
+        if (self.inline_view_combo.currentData() or "xy") != "xy":
+            self.canvas.set_view_rotation(0.0, emit_signal=False)
         self._schedule_inline_volume_preview_refresh(delay_ms=10)
 
     def _schedule_inline_volume_preview_refresh(self, *, delay_ms: int = 80) -> None:
@@ -657,7 +670,34 @@ class MainController(
         self.inline_volume_preview.apply_zoom_factor(float(factor), emit_signal=False)
 
     def _sync_canvas_zoom_from_inline(self, factor: float) -> None:
+        if (self.inline_view_combo.currentData() or "xy") == "xy":
+            return
         self.canvas.apply_zoom_factor(float(factor), emit_signal=False)
+
+    def _sync_canvas_view_window_from_inline(
+        self,
+        center_x_norm: float,
+        center_y_norm: float,
+        frac_x: float,
+        frac_y: float,
+    ) -> None:
+        if not getattr(self, "_inline_volume_enabled", False):
+            return
+        if (self.inline_view_combo.currentData() or "xy") != "xy":
+            return
+        self.canvas.set_normalized_view_window(
+            center_xy_norm=(float(center_x_norm), float(center_y_norm)),
+            visible_fraction_xy=(float(frac_x), float(frac_y)),
+            emit_signal=False,
+        )
+
+    def _sync_canvas_rotation_from_inline(self, yaw_deg: float) -> None:
+        if not getattr(self, "_inline_volume_enabled", False):
+            return
+        if (self.inline_view_combo.currentData() or "xy") != "xy":
+            self.canvas.set_view_rotation(0.0, emit_signal=False)
+            return
+        self.canvas.set_view_rotation(float(yaw_deg), emit_signal=False)
 
     def _sync_inline_view_window_from_canvas(
         self,
@@ -777,6 +817,9 @@ class MainController(
             return
         if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_Comma:
             self._review_prev_stack()
+            return
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_Slash:
+            self._review_next_unfinished_stack()
             return
         if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_1:
             self._review_mark_a()
@@ -1118,6 +1161,7 @@ class MainController(
             "Keyboard Shortcuts:\n"
             "  Arrow keys - previous/next slice\n"
             "  Alt+, / Alt+. - previous/next review stack\n"
+            "  Alt+/ - jump to the next unfinished zstack in the fixed queue\n"
             "  Alt+1 / Alt+2 / Alt+3 - mark review A/B/C\n"
             "  Alt+Shift+F - export reviewed final masks (A/B/C)\n"
             "  Alt+Q - run quick auto script (seed->dilate->bg->grow->bg)\n"
@@ -1126,6 +1170,7 @@ class MainController(
             "  Alt+G - open 3D inspector for the current stack\n"
             "  Alt+Shift+G - open 3D inspector with matching inference assets\n"
             "  G (when 3D preview focused) - reset left 3D view to the selected base orientation\n"
+            "  Left 3D preview: left drag pan, right drag rotate, wheel zoom, Ctrl+left = rotate on macOS\n"
             "  D (hold) - click/drag delete connected component(s)\n"
             "  E - erode current mask\n"
             "  Z/X - undo/redo\n"
@@ -1137,8 +1182,9 @@ class MainController(
             "Toolbar Buttons:\n"
             "  Prev/Next - move one slice backward or forward\n"
             "  Prev Stack/Next Stack - move between raw+prediction pairs from the review tracker\n"
+            "  Next Unfinished - skip completed stacks and jump to the next pending zstack\n"
             "  Build Tracker - create/refresh tracker from raw+prediction folders\n"
-            "  Review selection uses random unfinished pairs (completed pairs are excluded)\n"
+            "  Review queue is fixed when the tracker is built; low-foreground predictions are weighted earlier\n"
             "  Export Final Masks - build unified final mask set from reviewed items\n"
             "  Auto Preset - choose conservative/balanced/aggressive parameters\n"
             "  Quick Auto Script - run default cleanup pipeline on current slice\n"

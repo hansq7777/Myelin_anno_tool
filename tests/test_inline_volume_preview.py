@@ -53,9 +53,13 @@ def _wait_until(app, predicate, timeout_sec: float = 1.5) -> bool:
 
 def _wheel_event_for(widget, delta_y: int = 120) -> QWheelEvent:
     center = widget.rect().center()
+    return _wheel_event_at(widget, QPointF(center), delta_y)
+
+
+def _wheel_event_at(widget, pos: QPointF, delta_y: int = 120) -> QWheelEvent:
     return QWheelEvent(
-        QPointF(center),
-        QPointF(center),
+        QPointF(pos),
+        QPointF(pos),
         QPoint(0, 0),
         QPoint(0, delta_y),
         Qt.NoButton,
@@ -63,6 +67,16 @@ def _wheel_event_for(widget, delta_y: int = 120) -> QWheelEvent:
         Qt.ScrollUpdate,
         False,
     )
+
+
+def _mouse_event(
+    event_type: QEvent.Type,
+    pos: QPointF,
+    button: Qt.MouseButton,
+    buttons: Qt.MouseButtons,
+    modifiers: Qt.KeyboardModifiers = Qt.NoModifier,
+) -> QMouseEvent:
+    return QMouseEvent(event_type, QPointF(pos), button, buttons, modifiers)
 
 
 def test_choose_downsample_steps_keeps_preview_volume_bounded():
@@ -228,7 +242,7 @@ def test_inline_volume_preview_renders_new_view_in_background(app, monkeypatch):
     assert _wait_until(app, lambda: preview._render_thread is None and preview._base_image is not None)
 
 
-def test_inline_volume_preview_drag_rotates_and_g_resets(app):
+def test_inline_volume_preview_left_drag_pans_view_window(app):
     preview = InlineVolumePreview()
     preview.resize(360, 360)
     raw = np.random.randint(0, 255, (18, 72, 72), dtype=np.uint8)
@@ -238,29 +252,37 @@ def test_inline_volume_preview_drag_rotates_and_g_resets(app):
     preview.set_view_mode("xy")
     preview.set_volume(raw, mask, (0.4, 0.4, 0.5), cache_key=("stack-b",))
     assert _wait_until(app, lambda: preview._render_thread is None and preview._projection is not None)
+    preview.apply_zoom_factor(1.8)
+
+    before_center, before_frac = preview.normalized_view_window()
+    press = _mouse_event(QEvent.MouseButtonPress, QPointF(140, 140), Qt.LeftButton, Qt.LeftButton)
+    move = _mouse_event(QEvent.MouseMove, QPointF(188, 118), Qt.NoButton, Qt.LeftButton)
+    release = _mouse_event(QEvent.MouseButtonRelease, QPointF(188, 118), Qt.LeftButton, Qt.NoButton)
+    QApplication.sendEvent(preview, press)
+    QApplication.sendEvent(preview, move)
+    QApplication.sendEvent(preview, release)
+    after_center, after_frac = preview.normalized_view_window()
+
+    assert after_center[0] < before_center[0]
+    assert after_center[1] > before_center[1]
+    assert after_frac == pytest.approx(before_frac)
+
+
+def test_inline_volume_preview_right_drag_rotates_and_g_resets(app):
+    preview = InlineVolumePreview()
+    preview.resize(360, 360)
+    raw = np.random.randint(0, 255, (18, 72, 72), dtype=np.uint8)
+    mask = np.zeros_like(raw, dtype=np.uint8)
+    mask[5:13, 24:48, 22:50] = 1
+
+    preview.set_view_mode("xy")
+    preview.set_volume(raw, mask, (0.4, 0.4, 0.5), cache_key=("stack-b-rotate",))
+    assert _wait_until(app, lambda: preview._render_thread is None and preview._projection is not None)
 
     base_rotation = preview._projection.rotation.copy()
-    press = QMouseEvent(
-        QEvent.MouseButtonPress,
-        QPointF(140, 140),
-        Qt.LeftButton,
-        Qt.LeftButton,
-        Qt.NoModifier,
-    )
-    move = QMouseEvent(
-        QEvent.MouseMove,
-        QPointF(188, 118),
-        Qt.NoButton,
-        Qt.LeftButton,
-        Qt.NoModifier,
-    )
-    release = QMouseEvent(
-        QEvent.MouseButtonRelease,
-        QPointF(188, 118),
-        Qt.LeftButton,
-        Qt.NoButton,
-        Qt.NoModifier,
-    )
+    press = _mouse_event(QEvent.MouseButtonPress, QPointF(140, 140), Qt.RightButton, Qt.RightButton)
+    move = _mouse_event(QEvent.MouseMove, QPointF(188, 118), Qt.NoButton, Qt.RightButton)
+    release = _mouse_event(QEvent.MouseButtonRelease, QPointF(188, 118), Qt.RightButton, Qt.NoButton)
     QApplication.sendEvent(preview, press)
     QApplication.sendEvent(preview, move)
     assert _wait_until(app, lambda: not preview._render_timer.isActive())
@@ -276,6 +298,47 @@ def test_inline_volume_preview_drag_rotates_and_g_resets(app):
     assert yaw_offset == pytest.approx(0.0)
     assert pitch_offset == pytest.approx(0.0)
     assert np.allclose(preview._projection.rotation, base_rotation)
+
+
+def test_inline_volume_preview_ctrl_left_drag_rotates_for_macos(app):
+    preview = InlineVolumePreview()
+    preview.resize(360, 360)
+    raw = np.random.randint(0, 255, (18, 72, 72), dtype=np.uint8)
+    mask = np.zeros_like(raw, dtype=np.uint8)
+    mask[5:13, 24:48, 22:50] = 1
+
+    preview.set_view_mode("xy")
+    preview.set_volume(raw, mask, (0.4, 0.4, 0.5), cache_key=("stack-b-macos",))
+    assert _wait_until(app, lambda: preview._render_thread is None and preview._projection is not None)
+
+    press = _mouse_event(
+        QEvent.MouseButtonPress,
+        QPointF(140, 140),
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.ControlModifier,
+    )
+    move = _mouse_event(
+        QEvent.MouseMove,
+        QPointF(184, 126),
+        Qt.NoButton,
+        Qt.LeftButton,
+        Qt.ControlModifier,
+    )
+    release = _mouse_event(
+        QEvent.MouseButtonRelease,
+        QPointF(184, 126),
+        Qt.LeftButton,
+        Qt.NoButton,
+        Qt.ControlModifier,
+    )
+    QApplication.sendEvent(preview, press)
+    QApplication.sendEvent(preview, move)
+    QApplication.sendEvent(preview, release)
+
+    yaw_offset, pitch_offset = preview.rotation_offsets()
+    assert abs(yaw_offset) > 0.1
+    assert abs(pitch_offset) > 0.1
 
 
 def test_inline_volume_preview_wheel_zoom_scales_without_rebuild(app):
@@ -346,6 +409,79 @@ def test_main_controller_canvas_and_inline_zoom_stay_in_sync(app):
 
         assert widget.inline_volume_preview.zoom_factor() > preview_mid
         assert widget.canvas.zoom_factor() > canvas_mid
+    finally:
+        widget.model.mask_dirty = False
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()
+
+
+def test_main_controller_xy_inline_preview_controls_canvas_window_and_rotation(app):
+    widget = MainController()
+    try:
+        widget.resize(1200, 780)
+        widget.show()
+        data = np.random.randint(0, 255, (12, 96, 96), dtype=np.uint8)
+        widget.model.data = data
+        widget.model.original_data = data.copy()
+        widget.model.ensure_masks()
+        widget.slider.setRange(0, data.shape[0] - 1)
+        widget.slider.setEnabled(True)
+        widget._update_view(reset_view=True)
+        widget.inline_volume_chk.setChecked(True)
+        app.processEvents()
+        widget._refresh_inline_volume_preview()
+        assert _wait_until(app, lambda: widget.inline_volume_preview._base_image is not None)
+
+        preview = widget.inline_volume_preview
+        QApplication.sendEvent(
+            preview,
+            _mouse_event(QEvent.MouseButtonPress, QPointF(150, 150), Qt.LeftButton, Qt.LeftButton),
+        )
+        QApplication.sendEvent(
+            preview,
+            _mouse_event(QEvent.MouseMove, QPointF(205, 176), Qt.NoButton, Qt.LeftButton),
+        )
+        QApplication.sendEvent(
+            preview,
+            _mouse_event(QEvent.MouseButtonRelease, QPointF(205, 176), Qt.LeftButton, Qt.NoButton),
+        )
+        app.processEvents()
+
+        preview_center, preview_visible = preview.normalized_view_window()
+        canvas_center, canvas_visible = widget.canvas.normalized_view_window()
+        assert canvas_center[0] == pytest.approx(preview_center[0], abs=0.06)
+        assert canvas_center[1] == pytest.approx(preview_center[1], abs=0.06)
+        assert canvas_visible[0] == pytest.approx(preview_visible[0], abs=0.06)
+        assert canvas_visible[1] == pytest.approx(preview_visible[1], abs=0.06)
+
+        QApplication.sendEvent(
+            preview,
+            _mouse_event(QEvent.MouseButtonPress, QPointF(200, 150), Qt.RightButton, Qt.RightButton),
+        )
+        QApplication.sendEvent(
+            preview,
+            _mouse_event(QEvent.MouseMove, QPointF(242, 132), Qt.NoButton, Qt.RightButton),
+        )
+        QApplication.sendEvent(
+            preview,
+            _mouse_event(QEvent.MouseButtonRelease, QPointF(242, 132), Qt.RightButton, Qt.NoButton),
+        )
+        assert _wait_until(app, lambda: not preview._render_timer.isActive())
+
+        yaw_offset, _pitch_offset = preview.rotation_offsets()
+        assert widget.canvas.view_rotation_deg() == pytest.approx(yaw_offset, abs=1.0)
+
+        wheel_pos = QPointF(96.0, 112.0)
+        QApplication.sendEvent(preview, _wheel_event_at(preview, wheel_pos, 120))
+        app.processEvents()
+
+        preview_center, preview_visible = preview.normalized_view_window()
+        canvas_center, canvas_visible = widget.canvas.normalized_view_window()
+        assert canvas_center[0] == pytest.approx(preview_center[0], abs=0.06)
+        assert canvas_center[1] == pytest.approx(preview_center[1], abs=0.06)
+        assert canvas_visible[0] == pytest.approx(preview_visible[0], abs=0.06)
+        assert canvas_visible[1] == pytest.approx(preview_visible[1], abs=0.06)
     finally:
         widget.model.mask_dirty = False
         widget.close()

@@ -577,6 +577,42 @@ def test_open_review_tracker_always_prompts_for_confirmation(controller, monkeyp
     assert chosen["loaded_path"] == "/tmp/confirmed_tracker.xlsx"
 
 
+def test_review_maybe_reshuffle_loaded_tracker_prompts_and_saves(controller, monkeypatch):
+    controller._review_table_rows = [{"zstack_id": "stack_a", "review_grade": "", "review_queue_rank": 1}]
+    calls = {}
+    monkeypatch.setattr(review_helper.QMessageBox, "question", lambda *args, **kwargs: review_helper.QMessageBox.Yes)
+    monkeypatch.setattr(
+        controller,
+        "_review_reshuffle_loaded_tracker_queue",
+        lambda: calls.setdefault("reshuffled", True),
+    )
+    monkeypatch.setattr(controller, "_review_save_tracker", lambda: calls.setdefault("saved", True))
+
+    result = controller._review_maybe_reshuffle_loaded_tracker()
+
+    assert result is True
+    assert calls == {"reshuffled": True, "saved": True}
+
+
+def test_review_reshuffle_loaded_tracker_queue_keeps_reviewed_items_first(controller):
+    controller._review_table_rows = [
+        {"zstack_id": "stack_c", "review_grade": "", "review_queue_rank": 3},
+        {"zstack_id": "stack_a", "review_grade": "A", "review_queue_rank": 2},
+        {"zstack_id": "stack_d", "review_grade": "", "review_queue_rank": 4},
+        {"zstack_id": "stack_b", "review_grade": "B", "review_queue_rank": 1},
+    ]
+
+    controller._review_reshuffle_loaded_tracker_queue()
+
+    rank_by_id = {
+        row["zstack_id"]: int(row["review_queue_rank"])
+        for row in controller._review_table_rows
+    }
+    assert rank_by_id["stack_b"] == 1
+    assert rank_by_id["stack_a"] == 2
+    assert {rank_by_id["stack_c"], rank_by_id["stack_d"]} == {3, 4}
+
+
 def test_review_default_tracker_filename_uses_raw_folder_and_date(controller):
     filename = controller._review_default_tracker_filename(
         "/tmp/2026-02-11_run/original_zstacks",
@@ -605,10 +641,11 @@ def test_build_tracker_uses_generated_default_filename(controller, monkeypatch):
 
     monkeypatch.setattr(review_helper.QFileDialog, "getExistingDirectory", fake_existing_directory)
     monkeypatch.setattr(review_helper.QFileDialog, "getSaveFileName", fake_save_file_name)
+    monkeypatch.setattr(controller, "_review_choose_import_tracker_path", lambda raw_dir, tracker_path: "")
     monkeypatch.setattr(
         controller,
         "_review_build_tracker_rows",
-        lambda raw_dir, pred_dir, tracker_path: (
+        lambda raw_dir, pred_dir, tracker_path, import_tracker_path="": (
             [],
             {
                 "matched": 0,
@@ -634,3 +671,207 @@ def test_build_tracker_uses_generated_default_filename(controller, monkeypatch):
         "/tmp/2026-02-11_run/original_zstacks"
     )
     assert calls["loaded_path"] == "/tmp/confirmed_tracker.xlsx"
+
+
+def test_build_tracker_passes_selected_import_tracker(controller, monkeypatch):
+    captured = {}
+
+    def fake_existing_directory(_parent, title):
+        if title == "Select Raw Stack Folder":
+            return "/tmp/run/original_zstacks"
+        if title == "Select Prediction Mask Folder":
+            return "/tmp/run/predictions"
+        return ""
+
+    def fake_save_file_name(_parent, _title, _start_path, _filter_text):
+        return ("/tmp/new_tracker.xlsx", "Excel Files (*.xlsx)")
+
+    monkeypatch.setattr(review_helper.QFileDialog, "getExistingDirectory", fake_existing_directory)
+    monkeypatch.setattr(review_helper.QFileDialog, "getSaveFileName", fake_save_file_name)
+    monkeypatch.setattr(
+        controller,
+        "_review_choose_import_tracker_path",
+        lambda raw_dir, tracker_path: "/tmp/old_tracker.xlsx",
+    )
+
+    def fake_build_rows(raw_dir, pred_dir, tracker_path, import_tracker_path=""):
+        captured["raw_dir"] = raw_dir
+        captured["pred_dir"] = pred_dir
+        captured["tracker_path"] = tracker_path
+        captured["import_tracker_path"] = import_tracker_path
+        return (
+            [],
+            {
+                "matched": 0,
+                "raw_only": 0,
+                "pred_only": 0,
+                "raw_duplicates": 0,
+                "pred_duplicates": 0,
+            },
+        )
+
+    monkeypatch.setattr(controller, "_review_build_tracker_rows", fake_build_rows)
+    monkeypatch.setattr(controller, "_review_write_tracker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(controller, "_load_review_tracker", lambda _path: None)
+    monkeypatch.setattr(review_helper.QMessageBox, "information", lambda *args, **kwargs: None)
+
+    controller._review_build_tracker_from_folders()
+
+    assert captured["raw_dir"] == "/tmp/run/original_zstacks"
+    assert captured["pred_dir"] == "/tmp/run/predictions"
+    assert captured["tracker_path"] == "/tmp/new_tracker.xlsx"
+    assert captured["import_tracker_path"] == "/tmp/old_tracker.xlsx"
+
+
+def test_review_build_tracker_assigns_fixed_weighted_queue(controller, monkeypatch):
+    controller._review_rng.seed(7)
+    monkeypatch.setattr(
+        controller,
+        "_review_collect_stack_files",
+        lambda root_dir, allow_czi: (
+            ["/tmp/raw_a.ome.tif", "/tmp/raw_b.ome.tif", "/tmp/raw_c.ome.tif"]
+            if allow_czi
+            else ["/tmp/raw_a.pred.ome.tif", "/tmp/raw_b.pred.ome.tif", "/tmp/raw_c.pred.ome.tif"]
+        ),
+    )
+    monkeypatch.setattr(controller, "_review_load_existing_rows_by_id", lambda _path: {})
+    monkeypatch.setattr(controller, "_review_guess_source_group", lambda *_args: "group")
+    voxel_counts = {
+        "/tmp/raw_a.pred.ome.tif": 18,
+        "/tmp/raw_b.pred.ome.tif": 1800,
+        "/tmp/raw_c.pred.ome.tif": 180000,
+    }
+    monkeypatch.setattr(
+        controller,
+        "_review_prediction_foreground_voxels",
+        lambda path: voxel_counts[path],
+    )
+
+    rows, stats = controller._review_build_tracker_rows("/tmp/raw", "/tmp/pred", "/tmp/tracker.xlsx")
+
+    assert stats["matched"] == 3
+    assert [int(row["review_queue_rank"]) for row in rows] == [1, 2, 3]
+    assert rows[0]["zstack_id"] == "raw_a"
+    assert rows[0]["inference_foreground_voxels"] == 18
+    assert float(rows[0]["review_priority_weight"]) > float(rows[-1]["review_priority_weight"])
+
+
+def test_review_build_tracker_imports_review_fields_but_regenerates_queue(controller, monkeypatch):
+    controller._review_rng.seed(11)
+    monkeypatch.setattr(
+        controller,
+        "_review_collect_stack_files",
+        lambda root_dir, allow_czi: ["/tmp/raw_a.ome.tif"] if allow_czi else ["/tmp/raw_a.pred.ome.tif"],
+    )
+    monkeypatch.setattr(
+        controller,
+        "_review_load_existing_rows_by_id",
+        lambda path: {
+            "raw_a": {
+                "review_grade": "B",
+                "review_completed": 1,
+                "review_completed_at": "2026-01-01 08:00:00",
+                "review_queue_rank": 99,
+                "review_priority_weight": "0.000001",
+            }
+        },
+    )
+    monkeypatch.setattr(controller, "_review_guess_source_group", lambda *_args: "group")
+    monkeypatch.setattr(controller, "_review_prediction_foreground_voxels", lambda _path: 128)
+
+    rows, _stats = controller._review_build_tracker_rows(
+        "/tmp/raw",
+        "/tmp/pred",
+        "/tmp/tracker.xlsx",
+        import_tracker_path="/tmp/old_tracker.xlsx",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["review_grade"] == "B"
+    assert rows[0]["review_completed"] == 1
+    assert rows[0]["review_completed_at"] == "2026-01-01 08:00:00"
+    assert int(rows[0]["review_queue_rank"]) == 1
+    assert rows[0]["review_priority_weight"] != "0.000001"
+
+
+def test_review_refresh_items_uses_queue_rank_order(controller, monkeypatch):
+    rows = [
+        {
+            "zstack_id": "stack_b",
+            "raw_path": "/tmp/raw_b.ome.tif",
+            "inference_path": "/tmp/pred_b.ome.tif",
+            "review_queue_rank": 2,
+            "review_grade": "",
+            "review_completed": "",
+            "review_completed_at": "",
+            "review_corrected_mask_path": "",
+            "source_group": "",
+        },
+        {
+            "zstack_id": "stack_a",
+            "raw_path": "/tmp/raw_a.ome.tif",
+            "inference_path": "/tmp/pred_a.ome.tif",
+            "review_queue_rank": 1,
+            "review_grade": "A",
+            "review_completed": 1,
+            "review_completed_at": "2026-01-01 10:00:00",
+            "review_corrected_mask_path": "",
+            "source_group": "",
+        },
+    ]
+    controller._review_header_names = list(rows[0].keys())
+    controller._review_table_rows = rows
+    controller._review_rebuild_header_index()
+    monkeypatch.setattr(review_helper, "windows_to_local_path", lambda path: path)
+    monkeypatch.setattr(review_helper.os.path, "exists", lambda _path: True)
+
+    controller._review_refresh_items()
+
+    assert [item["zstack_id"] for item in controller._review_items] == ["stack_a", "stack_b"]
+    assert controller._review_items[0]["completed"] is True
+
+
+def test_review_next_unfinished_stack_includes_incomplete_b_grade_items(controller, monkeypatch):
+    controller._review_items = [
+        {"zstack_id": "stack_a", "grade": "A", "completed": True, "raw_path": "/tmp/a.ome.tif"},
+        {"zstack_id": "stack_b", "grade": "", "completed": False, "raw_path": "/tmp/b.ome.tif"},
+        {"zstack_id": "stack_c", "grade": "B", "completed": False, "raw_path": "/tmp/c.ome.tif"},
+        {"zstack_id": "stack_d", "grade": "", "completed": False, "raw_path": "/tmp/d.ome.tif"},
+    ]
+    controller._review_current_item_index = 1
+    controller._review_filtered_indices = [0, 1, 2, 3]
+    controller.review_filter_combo.setCurrentText("All")
+    loaded = {}
+    monkeypatch.setattr(controller, "_review_set_filter", lambda value: loaded.setdefault("filter", value))
+    monkeypatch.setattr(
+        controller,
+        "_review_rebuild_filtered_indices",
+        lambda load_item=False: controller._review_filtered_indices.__setitem__(slice(None), [0, 1, 2, 3]),
+    )
+    monkeypatch.setattr(controller, "_review_load_filtered_pos", lambda pos, force=False: loaded.setdefault("pos", pos))
+
+    controller._review_next_unfinished_stack()
+
+    assert loaded["filter"] == "All"
+    assert loaded["pos"] == 2
+
+
+def test_review_update_info_label_updates_canvas_and_preview_badges(controller):
+    controller.model.path = "/tmp/review_stack.ome.tif"
+    controller._review_items = [
+        {
+            "zstack_id": "review_stack",
+            "grade": "B",
+            "completed": True,
+            "raw_path": "/tmp/review_stack.ome.tif",
+        }
+    ]
+    controller._review_filtered_indices = [0]
+    controller._review_current_item_index = 0
+    controller._review_current_filtered_pos = 0
+
+    controller._review_update_info_label()
+
+    assert controller.canvas._review_badge_text == "B"
+    assert controller.canvas._review_badge_done is True
+    assert controller.inline_volume_preview._review_badge_text == "B"
