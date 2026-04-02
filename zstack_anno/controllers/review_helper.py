@@ -4,6 +4,7 @@ from datetime import datetime
 import csv
 import os
 import random
+import re
 import shutil
 from typing import TYPE_CHECKING
 
@@ -75,11 +76,7 @@ class ReviewMixin:
 
     # --------- public actions ---------
     def _open_review_tracker(self: "MainController") -> None:
-        # Project default: auto-load the shared tracker if it exists.
         default_local = windows_to_local_path(DEFAULT_REVIEW_TRACKER_WINDOWS)
-        if default_local and os.path.exists(default_local):
-            self._load_review_tracker(default_local)
-            return
 
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -99,10 +96,11 @@ class ReviewMixin:
         if not pred_dir:
             return
 
+        default_tracker_path = self._review_default_tracker_path(raw_dir)
         tracker_path, _ = QFileDialog.getSaveFileName(
             self,
             "Create or Refresh Review Tracker",
-            self._review_tracker_path or os.path.join(raw_dir, "review_tracker.xlsx"),
+            self._review_tracker_path or default_tracker_path,
             "Tracker Files (*.xlsx *.csv);;Excel Files (*.xlsx);;CSV Files (*.csv)",
         )
         if not tracker_path:
@@ -626,6 +624,45 @@ class ReviewMixin:
             "pred_duplicates": pred_duplicates,
         }
         return rows, stats
+
+    @staticmethod
+    def _review_tracker_name_stem(raw_dir: str) -> str:
+        normalized = os.path.normpath(raw_dir or "")
+        raw_name = os.path.basename(normalized)
+        parent_name = os.path.basename(os.path.dirname(normalized))
+        generic_names = {
+            "original_zstacks",
+            "raw",
+            "raw_stacks",
+            "stacks",
+            "images",
+        }
+        if raw_name.lower() in generic_names and parent_name:
+            stem = f"{parent_name}_{raw_name}"
+        else:
+            stem = raw_name or parent_name or "zstacks"
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-")
+        return stem or "zstacks"
+
+    @classmethod
+    def _review_default_tracker_filename(
+        cls,
+        raw_dir: str,
+        *,
+        when: datetime | None = None,
+    ) -> str:
+        created = (when or datetime.now()).strftime("%Y-%m-%d")
+        stem = cls._review_tracker_name_stem(raw_dir)
+        return f"{stem}_review_tracker_{created}.xlsx"
+
+    @classmethod
+    def _review_default_tracker_path(
+        cls,
+        raw_dir: str,
+        *,
+        when: datetime | None = None,
+    ) -> str:
+        return os.path.join(raw_dir, cls._review_default_tracker_filename(raw_dir, when=when))
 
     @staticmethod
     def _review_collect_stack_files(root_dir: str, *, allow_czi: bool) -> list[str]:

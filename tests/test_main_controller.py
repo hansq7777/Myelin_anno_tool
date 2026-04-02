@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import QApplication
 from zstack_anno.controllers.main_controller import MainController
 from zstack_anno.utils.volume_utils import VolumeSource
 import zstack_anno.controllers.morphology_helper as morphology_helper
+import zstack_anno.controllers.review_helper as review_helper
 import zstack_anno.controllers.script_helper as script_helper
 
 
@@ -546,3 +547,90 @@ def test_quick_auto_stack_cancelled_discards_partial_result(controller, app, mon
     message = controller.statusBar().currentMessage().lower()
     assert "cancelled" in message
     assert "no changes were applied" in message
+
+
+def test_open_review_tracker_always_prompts_for_confirmation(controller, monkeypatch):
+    chosen = {}
+    monkeypatch.setattr(
+        review_helper,
+        "windows_to_local_path",
+        lambda _path: "/tmp/default_tracker.xlsx",
+    )
+
+    def fake_open_file_name(parent, title, start_path, filter_text):
+        chosen["title"] = title
+        chosen["start_path"] = start_path
+        chosen["filter"] = filter_text
+        return ("/tmp/confirmed_tracker.xlsx", "Excel Files (*.xlsx)")
+
+    monkeypatch.setattr(review_helper.QFileDialog, "getOpenFileName", fake_open_file_name)
+    monkeypatch.setattr(
+        controller,
+        "_load_review_tracker",
+        lambda path: chosen.setdefault("loaded_path", path),
+    )
+
+    controller._open_review_tracker()
+
+    assert chosen["title"] == "Open Review Tracker"
+    assert chosen["start_path"] == "/tmp/default_tracker.xlsx"
+    assert chosen["loaded_path"] == "/tmp/confirmed_tracker.xlsx"
+
+
+def test_review_default_tracker_filename_uses_raw_folder_and_date(controller):
+    filename = controller._review_default_tracker_filename(
+        "/tmp/2026-02-11_run/original_zstacks",
+        when=review_helper.datetime(2026, 4, 2),
+    )
+
+    assert filename == "2026-02-11_run_original_zstacks_review_tracker_2026-04-02.xlsx"
+
+
+def test_build_tracker_uses_generated_default_filename(controller, monkeypatch):
+    calls = {"existing_dirs": []}
+
+    def fake_existing_directory(_parent, title):
+        calls["existing_dirs"].append(title)
+        if title == "Select Raw Stack Folder":
+            return "/tmp/2026-02-11_run/original_zstacks"
+        if title == "Select Prediction Mask Folder":
+            return "/tmp/2026-02-11_run/predictions"
+        return ""
+
+    def fake_save_file_name(parent, title, start_path, filter_text):
+        calls["save_title"] = title
+        calls["save_start_path"] = start_path
+        calls["save_filter"] = filter_text
+        return ("/tmp/confirmed_tracker.xlsx", "Excel Files (*.xlsx)")
+
+    monkeypatch.setattr(review_helper.QFileDialog, "getExistingDirectory", fake_existing_directory)
+    monkeypatch.setattr(review_helper.QFileDialog, "getSaveFileName", fake_save_file_name)
+    monkeypatch.setattr(
+        controller,
+        "_review_build_tracker_rows",
+        lambda raw_dir, pred_dir, tracker_path: (
+            [],
+            {
+                "matched": 0,
+                "raw_only": 0,
+                "pred_only": 0,
+                "raw_duplicates": 0,
+                "pred_duplicates": 0,
+            },
+        ),
+    )
+    monkeypatch.setattr(controller, "_review_write_tracker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        controller,
+        "_load_review_tracker",
+        lambda path: calls.setdefault("loaded_path", path),
+    )
+    monkeypatch.setattr(review_helper.QMessageBox, "information", lambda *args, **kwargs: None)
+
+    controller._review_build_tracker_from_folders()
+
+    assert calls["save_title"] == "Create or Refresh Review Tracker"
+    assert calls["save_start_path"] == controller._review_default_tracker_path(
+        "/tmp/2026-02-11_run/original_zstacks"
+    )
+    assert calls["loaded_path"] == "/tmp/confirmed_tracker.xlsx"
