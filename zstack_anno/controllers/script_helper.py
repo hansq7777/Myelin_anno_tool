@@ -13,6 +13,123 @@ if TYPE_CHECKING:  # pragma: no cover
 class ScriptMixin:
     """Methods used by the ScriptEditor."""
 
+    def _quick_auto_slice_pipeline(
+        self: "MainController",
+        original_mask: np.ndarray,
+        *,
+        seed_percentile: float,
+        seed_pixel_percent: float,
+        dilate_iterations: int,
+        bg1_percentile: float,
+        bg1_bins: int,
+        grow_diff_pct: float,
+        grow_hist_pct: float,
+        grow_force_pct: float,
+        grow_limit: int,
+        bg2_percentile: float,
+        bg2_bins: int,
+        final_bg_repeat: int,
+        final_bg_percentile: float,
+        final_bg_bins: int,
+        final_small_threshold: int,
+        addition_support_percentile: float,
+        protect_small_original: bool,
+        small_component_guard: int,
+    ) -> np.ndarray:
+        img = self.model._extract_slice(self.model.index)
+        cur_mask = original_mask.copy()
+        other_fg_values = np.array([], dtype=img.dtype)
+        if self.model.masks is not None and self.model.data is not None:
+            other_masks = self.model.masks.copy()
+            other_masks[self.model.index] = 0
+            other_fg_values = self.model.data[other_masks > 0]
+
+        def global_threshold(bins: int, slice_mask: np.ndarray) -> float | None:
+            if bins <= 0:
+                return None
+            current_values = img[slice_mask > 0]
+            if other_fg_values.size > 0 and current_values.size > 0:
+                values = np.concatenate((other_fg_values, current_values))
+            elif other_fg_values.size > 0:
+                values = other_fg_values
+            else:
+                values = current_values
+            if values.size == 0:
+                return None
+            _hist, edges = np.histogram(values, bins=256)
+            idx = min(int(bins), len(edges) - 2)
+            return float(edges[idx])
+
+        seeds = morphology_tools.sample_seeds(
+            img,
+            seed_percentile,
+            pixel_percent=seed_pixel_percent,
+        )
+        cur_mask[seeds > 0] = 1
+        cur_mask = morphology_tools.dilate(cur_mask, iterations=dilate_iterations)
+        cur_mask = morphology_tools.remove_mask_background(
+            img,
+            cur_mask,
+            bg1_percentile,
+            global_threshold(bg1_bins, cur_mask),
+        )
+
+        hist_pct = grow_hist_pct if grow_hist_pct >= 0 else None
+        force_pct = grow_force_pct if grow_force_pct >= 0 else None
+        limit = grow_limit if grow_limit > 0 else None
+        cur_mask = morphology_tools.intensity_region_grow(
+            img.astype(float),
+            cur_mask,
+            grow_diff_pct,
+            hist_pct,
+            force_pct,
+            limit,
+        )
+
+        cur_mask = morphology_tools.remove_mask_background(
+            img,
+            cur_mask,
+            bg2_percentile,
+            global_threshold(bg2_bins, cur_mask),
+        )
+        for _ in range(max(0, int(final_bg_repeat))):
+            cur_mask = morphology_tools.remove_mask_background(
+                img,
+                cur_mask,
+                final_bg_percentile,
+                global_threshold(final_bg_bins, cur_mask),
+            )
+
+        if final_small_threshold > 0 and self.model.masks is not None:
+            temp_stack = self.model.masks.copy()
+            temp_stack[self.model.index] = cur_mask
+            filtered_stack, _labels = morphology_tools.remove_small_components(
+                temp_stack,
+                int(final_small_threshold),
+            )
+            cur_mask = filtered_stack[self.model.index]
+
+        if addition_support_percentile >= 0:
+            img_float = img.astype(float)
+            support_thresh = float(np.percentile(img_float, addition_support_percentile))
+            support = img_float >= support_thresh
+            additions = (cur_mask > 0) & (original_mask == 0)
+            cur_mask[additions & ~support] = 0
+
+        if protect_small_original and small_component_guard > 0:
+            labels = morphology_tools.label_components(original_mask)
+            if labels.size > 0:
+                counts = np.bincount(labels.ravel())
+                if counts.size > 1:
+                    keep_ids = np.where(
+                        (np.arange(counts.size) > 0) & (counts <= small_component_guard)
+                    )[0]
+                    if keep_ids.size > 0:
+                        protected = np.isin(labels, keep_ids)
+                        cur_mask[protected] = 1
+
+        return cur_mask.astype(np.uint8, copy=False)
+
     def script_quick_seed_dilate_bg_int_bg(
         self: "MainController",
         seed_percentile: float = 85.0,
@@ -34,7 +151,8 @@ class ScriptMixin:
         protect_small_original: bool = True,
         small_component_guard: int = 120,
         show_status: bool = True,
-    ) -> dict[str, int] | None:
+        push_undo: bool = False,
+    ) -> dict[str, int | bool] | None:
         """Run the default quick-fix pipeline on the current slice.
 
         Order:
@@ -53,50 +171,32 @@ class ScriptMixin:
         original_mask = self.model.get_mask().copy()
         before_pixels = int(np.count_nonzero(original_mask))
         start = time.monotonic()
-
-        # Use negative values as "disabled" sentinels so this action remains
-        # compatible with the Script Editor parameter checks.
-        hist_pct = grow_hist_pct if grow_hist_pct >= 0 else None
-        force_pct = grow_force_pct if grow_force_pct >= 0 else None
-        limit = grow_limit if grow_limit > 0 else None
-
-        self.script_seed(percentile=seed_percentile, pixel_percent=seed_pixel_percent)
-        self.script_dilate(iterations=dilate_iterations)
-        self.script_bg_filter(percentile=bg1_percentile, bins=bg1_bins)
-        self.script_int_grow(
-            diff_pct=grow_diff_pct,
-            hist_pct=hist_pct,
-            force_pct=force_pct,
-            limit=limit,
+        if push_undo:
+            self._push_undo("quick_auto")
+        cur_mask = self._quick_auto_slice_pipeline(
+            original_mask,
+            seed_percentile=seed_percentile,
+            seed_pixel_percent=seed_pixel_percent,
+            dilate_iterations=dilate_iterations,
+            bg1_percentile=bg1_percentile,
+            bg1_bins=bg1_bins,
+            grow_diff_pct=grow_diff_pct,
+            grow_hist_pct=grow_hist_pct,
+            grow_force_pct=grow_force_pct,
+            grow_limit=grow_limit,
+            bg2_percentile=bg2_percentile,
+            bg2_bins=bg2_bins,
+            final_bg_repeat=final_bg_repeat,
+            final_bg_percentile=final_bg_percentile,
+            final_bg_bins=final_bg_bins,
+            final_small_threshold=final_small_threshold,
+            addition_support_percentile=addition_support_percentile,
+            protect_small_original=protect_small_original,
+            small_component_guard=small_component_guard,
         )
-        self.script_bg_filter(percentile=bg2_percentile, bins=bg2_bins)
-        for _ in range(max(0, int(final_bg_repeat))):
-            self.script_bg_filter(percentile=final_bg_percentile, bins=final_bg_bins)
-        if final_small_threshold > 0:
-            self.script_filter_small(threshold=int(final_small_threshold))
-
-        # Post-guard 1: only keep new additions that have enough intensity support.
-        cur_mask = self.model.get_mask().copy()
-        if addition_support_percentile >= 0:
-            img = self.model._extract_slice(self.model.index).astype(float)
-            support_thresh = float(np.percentile(img, addition_support_percentile))
-            support = img >= support_thresh
-            additions = (cur_mask > 0) & (original_mask == 0)
-            cur_mask[additions & ~support] = 0
-
-        # Post-guard 2: protect tiny original components from being erased.
-        if protect_small_original and small_component_guard > 0:
-            labels = morphology_tools.label_components(original_mask)
-            if labels.size > 0:
-                counts = np.bincount(labels.ravel())
-                if counts.size > 1:
-                    keep_ids = np.where(
-                        (np.arange(counts.size) > 0) & (counts <= small_component_guard)
-                    )[0]
-                    if keep_ids.size > 0:
-                        protected = np.isin(labels, keep_ids)
-                        cur_mask[protected] = 1
-
+        changed = not np.array_equal(cur_mask, original_mask)
+        if push_undo and not changed:
+            self._discard_last_undo()
         self.model.set_mask(cur_mask)
         self._update_view()
         after_pixels = int(np.count_nonzero(cur_mask))
@@ -110,7 +210,11 @@ class ScriptMixin:
                     f"pixels {before_pixels} -> {after_pixels}"
                 )
             )
-        return {"before_pixels": before_pixels, "after_pixels": after_pixels}
+        return {
+            "before_pixels": before_pixels,
+            "after_pixels": after_pixels,
+            "changed": changed,
+        }
 
     def script_dilate(self: "MainController", iterations: int = 1) -> None:
         if not self._ensure_masks():
@@ -143,9 +247,13 @@ class ScriptMixin:
         if not self._ensure_masks():
             return
         self._push_undo("filter")
-        cur = self.model.get_mask()
-        new = morphology_tools.remove_small(cur, threshold)
-        self.model.set_mask(new)
+        if self.model.masks is None:
+            return
+        if threshold <= 1:
+            self._discard_last_undo()
+            return
+        new, labels = morphology_tools.remove_small_components(self.model.masks, threshold)
+        self.model.replace_masks(new, components=labels, dirty=True)
         self._update_view()
 
     def script_skeletonize(
@@ -162,7 +270,7 @@ class ScriptMixin:
             result = morphology_tools.skeletonize_stack(
                 self.model.masks, algorithm=algorithm
             )
-            self.model.masks = result
+            self.model.replace_masks(result, dirty=True)
         else:
             cur = self.model.get_mask()
             params = {}

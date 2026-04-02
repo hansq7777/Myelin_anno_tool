@@ -15,6 +15,8 @@ from zstack_anno.utils.morphology_tools import (
     erode,
     label_components,
     remove_small,
+    remove_small_stack,
+    remove_small_components_with_stats,
     close,
     histogram_stretch_stack,
     threshold_absolute,
@@ -83,6 +85,44 @@ def test_remove_small():
         dtype=np.uint8,
     )
     assert np.array_equal(filtered, expected)
+
+
+def test_remove_small_stack_uses_total_3d_voxel_count():
+    stack = np.zeros((3, 4, 4), dtype=np.uint8)
+    stack[0, 0, 0] = 1
+    stack[1, 0, 0] = 1
+    stack[2, 0, 0] = 1
+    stack[0, 3, 3] = 1
+    stack[1, 3, 3] = 1
+
+    filtered = remove_small_stack(stack, 3)
+
+    expected = np.zeros_like(stack)
+    expected[:, 0, 0] = 1
+    assert np.array_equal(filtered, expected)
+
+
+def test_remove_small_components_with_stats_reports_3d_counts():
+    stack = np.zeros((3, 4, 4), dtype=np.uint8)
+    stack[0, 0, 0] = 1
+    stack[1, 0, 0] = 1
+    stack[2, 0, 0] = 1
+    stack[0, 3, 3] = 1
+    stack[1, 3, 3] = 1
+
+    filtered, labels, stats = remove_small_components_with_stats(stack, 3)
+
+    expected = np.zeros_like(stack)
+    expected[:, 0, 0] = 1
+    assert np.array_equal(filtered, expected)
+    assert labels.max() == 1
+    assert stats.total_components == 2
+    assert stats.removed_components == 1
+    assert stats.kept_components == 1
+    assert stats.total_voxels == 5
+    assert stats.removed_voxels == 2
+    assert stats.kept_voxels == 3
+    assert stats.removed_component_percent == pytest.approx(50.0)
 
 
 def test_close():

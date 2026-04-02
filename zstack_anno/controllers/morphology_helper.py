@@ -66,6 +66,48 @@ class IntGrowThread(QThread):
             self.finished.emit(result)
 
 
+class FilterSmall3DThread(QThread):
+    succeeded = pyqtSignal(object)
+    failed = pyqtSignal(object)
+
+    def __init__(
+        self,
+        masks: np.ndarray,
+        min_size: int,
+        request_id: int,
+        mask_revision: int,
+    ) -> None:
+        super().__init__()
+        self.masks = masks
+        self.min_size = int(min_size)
+        self.request_id = int(request_id)
+        self.mask_revision = int(mask_revision)
+
+    def run(self) -> None:
+        try:
+            filtered, labels, stats = morphology_tools.remove_small_components_with_stats(
+                self.masks,
+                self.min_size,
+            )
+        except Exception as exc:
+            self.failed.emit(
+                {
+                    "request_id": self.request_id,
+                    "error": str(exc),
+                }
+            )
+            return
+        self.succeeded.emit(
+            {
+                "request_id": self.request_id,
+                "mask_revision": self.mask_revision,
+                "filtered": filtered,
+                "labels": labels,
+                "stats": stats,
+            }
+        )
+
+
 class MorphologyMixin:
     """Actions for modifying masks and images."""
 
@@ -102,12 +144,88 @@ class MorphologyMixin:
     def _filter_small(self: "MainController") -> None:
         if not self._ensure_masks():
             return
-        self._push_undo("filter")
-        cur = self.model.get_mask()
+        existing = getattr(self, "filter_thread", None)
+        if existing is not None and existing.isRunning():
+            self.statusBar().showMessage("3D filter already running in background.")
+            return
         thresh = self.filter_spin.value() if hasattr(self, "filter_spin") else 100
-        new = morphology_tools.remove_small(cur, thresh)
-        self.model.set_mask(new)
-        self._update_view()
+        if self.model.masks is None:
+            return
+        if thresh <= 1:
+            self.statusBar().showMessage("3D filter skipped: threshold <= 1 keeps all components.")
+            return
+        request_id = int(getattr(self, "_filter_request_seq", 0)) + 1
+        mask_revision = int(self.model.mask_revision)
+        mask_snapshot = np.array(self.model.masks, copy=True, order="C")
+        self._filter_request_seq = request_id
+        self._active_filter_request_id = request_id
+        self._pending_filter_undo_mask = mask_snapshot
+        self._set_filter_small_busy(True)
+        self.statusBar().showMessage(f"3D filter <{thresh} running in background...")
+        thread = FilterSmall3DThread(mask_snapshot, thresh, request_id, mask_revision)
+        thread.finished.connect(thread.deleteLater)
+        thread.succeeded.connect(self._filter_small_finished)
+        thread.failed.connect(self._filter_small_failed)
+        self.filter_thread = thread
+        thread.start()
+
+    def _set_filter_small_busy(self: "MainController", busy: bool) -> None:
+        if hasattr(self, "filter_btn"):
+            self.filter_btn.setEnabled(not busy)
+        if hasattr(self, "filter_spin"):
+            self.filter_spin.setEnabled(not busy)
+
+    def _cleanup_filter_small_thread(self: "MainController") -> None:
+        self.filter_thread = None
+        self._active_filter_request_id = None
+        self._pending_filter_undo_mask = None
+        self._set_filter_small_busy(False)
+
+    def _format_filter_small_stats(
+        self: "MainController",
+        stats: morphology_tools.ComponentFilterStats,
+    ) -> str:
+        if stats.total_components <= 0:
+            return f"3D filter <{stats.min_size}: 0 components found, 0 voxels removed."
+        return (
+            f"3D filter <{stats.min_size}: removed "
+            f"{stats.removed_components}/{stats.total_components} components "
+            f"({stats.removed_component_percent:.1f}%), "
+            f"{stats.removed_voxels}/{stats.total_voxels} voxels."
+        )
+
+    def _filter_small_finished(self: "MainController", payload: dict) -> None:
+        try:
+            request_id = int(payload.get("request_id", -1))
+            if request_id != getattr(self, "_active_filter_request_id", None):
+                return
+            if int(self.model.mask_revision) != int(payload.get("mask_revision", -1)):
+                self.statusBar().showMessage(
+                    "3D filter result discarded: mask changed while background filter was running."
+                )
+                return
+            undo_mask = getattr(self, "_pending_filter_undo_mask", None)
+            if undo_mask is not None:
+                self._push_undo("filter", mask=undo_mask)
+            self.model.replace_masks(
+                payload["filtered"],
+                components=payload["labels"],
+                dirty=True,
+            )
+            self._update_view()
+            self.statusBar().showMessage(self._format_filter_small_stats(payload["stats"]))
+        finally:
+            self._cleanup_filter_small_thread()
+
+    def _filter_small_failed(self: "MainController", payload: dict) -> None:
+        try:
+            request_id = int(payload.get("request_id", -1))
+            if request_id != getattr(self, "_active_filter_request_id", None):
+                return
+            error = str(payload.get("error", "unknown error"))
+            self.statusBar().showMessage(f"3D filter failed: {error}")
+        finally:
+            self._cleanup_filter_small_thread()
 
     def _skeletonize_current(self: "MainController") -> None:
         if not self._ensure_masks():
@@ -133,7 +251,7 @@ class MorphologyMixin:
             result = morphology_tools.skeletonize_stack(
                 self.model.masks, algorithm=alg, **params
             )
-            self.model.masks = result
+            self.model.replace_masks(result, dirty=True)
         else:
             cur = self.model.get_mask()
             new = morphology_tools.skeletonize_slice(cur, algorithm=alg, **params)
@@ -351,9 +469,9 @@ class MorphologyMixin:
             return
         self._push_undo("clear_to_current")
         idx = int(self.model.index)
-        self.model.masks[: idx + 1] = 0
-        self.model.mask_dirty = True
-        self.model.update_components()
+        new_masks = self.model.masks.copy()
+        new_masks[: idx + 1] = 0
+        self.model.replace_masks(new_masks, dirty=True)
         self._update_view()
 
     def _clear_from_current_slice(self: "MainController") -> None:
@@ -362,7 +480,7 @@ class MorphologyMixin:
             return
         self._push_undo("clear_from_current")
         idx = int(self.model.index)
-        self.model.masks[idx:] = 0
-        self.model.mask_dirty = True
-        self.model.update_components()
+        new_masks = self.model.masks.copy()
+        new_masks[idx:] = 0
+        self.model.replace_masks(new_masks, dirty=True)
         self._update_view()

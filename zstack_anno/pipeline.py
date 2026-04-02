@@ -70,9 +70,12 @@ class StrategyRunner:
 
     def filter_small(self, threshold: int = 100) -> None:
         self.model.ensure_masks()
-        cur = self.model.get_mask()
-        new = morphology_tools.remove_small(cur, threshold)
-        self.model.set_mask(new)
+        if self.model.masks is None:
+            return
+        if threshold <= 1:
+            return
+        new, labels = morphology_tools.remove_small_components(self.model.masks, threshold)
+        self.model.replace_masks(new, components=labels, dirty=True)
 
     def threshold_abs(self, value: float = 0.0) -> None:
         self.model.ensure_masks()

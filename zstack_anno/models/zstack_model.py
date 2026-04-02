@@ -37,6 +37,14 @@ class ZStackModel:
         self._seg_params: tuple[float, bool] | None = None
         self._segment_mask: np.ndarray | None = None
         self.mask_alignment_note: str | None = None
+        self.image_revision: int = 0
+        self.mask_revision: int = 0
+
+    def _touch_image_revision(self) -> None:
+        self.image_revision += 1
+
+    def _touch_mask_revision(self) -> None:
+        self.mask_revision += 1
 
     def load(self, path: str) -> None:
         """Load a stack from TIFF or CZI and reset masks."""
@@ -79,6 +87,8 @@ class ZStackModel:
         self._seg_params = None
         self._segment_mask = None
         self.mask_alignment_note = None
+        self._touch_image_revision()
+        self._touch_mask_revision()
 
     def load_masks(self, path: str) -> None:
         """Load mask stack from a TIFF file."""
@@ -110,6 +120,7 @@ class ZStackModel:
         self.mask_path = path
         self.mask_dirty = False
         self.update_components()
+        self._touch_mask_revision()
 
     def resample_image_to_shape(self, target_shape: tuple[int, int, int]) -> bool:
         """Resample loaded image stack in memory to ``target_shape`` (Z, Y, X).
@@ -157,6 +168,8 @@ class ZStackModel:
         self._slice_intensity = None
         self._seg_params = None
         self._segment_mask = None
+        self._touch_image_revision()
+        self._touch_mask_revision()
 
         # Keep physical extent by updating pixel size metadata if available.
         sizes = self.get_pixel_sizes()
@@ -196,6 +209,41 @@ class ZStackModel:
         self.mask_path = path
         self.mask_dirty = False
 
+    def replace_masks(
+        self,
+        masks: np.ndarray | None,
+        *,
+        components: np.ndarray | None = None,
+        mask_path: str | None = None,
+        dirty: bool = True,
+    ) -> None:
+        """Replace the entire mask stack and optionally reuse precomputed component labels."""
+        if masks is None:
+            self.masks = None
+            self.components = None
+            self.mask_path = mask_path
+            self.mask_dirty = dirty
+            self._touch_mask_revision()
+            return
+        arr = (np.asarray(masks) > 0).astype(np.uint8, copy=False)
+        if arr.ndim != 3:
+            raise ValueError(f"Mask stack must be 3-D, got shape={arr.shape}")
+        if self.data is not None and arr.shape != self.data.shape:
+            raise ValueError(f"Mask stack shape {arr.shape} does not match image shape {self.data.shape}")
+        self.masks = arr
+        self.mask_path = mask_path if mask_path is not None else self.mask_path
+        self.mask_dirty = dirty
+        if components is not None:
+            comp_arr = np.asarray(components)
+            if comp_arr.shape != arr.shape:
+                raise ValueError(
+                    f"Component label shape {comp_arr.shape} does not match mask shape {arr.shape}"
+                )
+            self.components = comp_arr.astype(np.int32, copy=False)
+        else:
+            self.update_components()
+        self._touch_mask_revision()
+
     def get_mask(self, slice_idx: int | None = None) -> np.ndarray:
         """Return mask array for the given slice (defaults to current)."""
         if self.masks is None:
@@ -221,6 +269,7 @@ class ZStackModel:
         self.mask_dirty = True
         if update_components:
             self.update_components()
+        self._touch_mask_revision()
 
     # --------- mask helpers ---------
     def default_mask_path(self) -> str:
@@ -240,6 +289,7 @@ class ZStackModel:
         tifffile.imwrite(self.mask_path, self.masks, description=desc)
         self.mask_dirty = False
         self.components = np.zeros_like(self.masks, dtype=np.int32)
+        self._touch_mask_revision()
 
     def save_slice(self, slice_idx: int | None = None) -> None:
         """Write ``slice_idx`` of the mask stack back to ``mask_path``."""
@@ -262,14 +312,14 @@ class ZStackModel:
             self.masks = np.zeros_like(self.data, dtype=np.uint8)
             self.components = np.zeros_like(self.masks, dtype=np.int32)
             self.mask_dirty = False
+            self._touch_mask_revision()
 
     def update_components(self) -> None:
         """Recompute connected component labels for all masks."""
         if self.masks is None:
             self.components = None
             return
-        labeled = [label_components(slice_) for slice_ in self.masks]
-        self.components = np.stack(labeled)
+        self.components = label_components(self.masks)
 
     # 便利属性
     @property
@@ -305,9 +355,7 @@ class ZStackModel:
             return 0
         if self.components is None:
             self.update_components()
-        return int(
-            sum(self.components[i].max() for i in range(self.components.shape[0]))
-        )
+        return int(self.components.max())
 
     # -------- intensity helpers ---------
     def _compute_slice_intensity(self) -> np.ndarray:
@@ -493,6 +541,13 @@ class ZStackModel:
             self.update_components()
         mask = self.masks[slice_idx]
         labels = self.components[slice_idx]
+        height, width = mask.shape
+        x0 = max(0, min(int(x0), width))
+        x1 = max(0, min(int(x1), width))
+        y0 = max(0, min(int(y0), height))
+        y1 = max(0, min(int(y1), height))
+        if x0 >= x1 or y0 >= y1:
+            return False
         sub = labels[y0:y1, x0:x1]
         to_del = np.unique(sub)
         to_del = to_del[to_del > 0]
@@ -519,6 +574,9 @@ class ZStackModel:
         if self.ome_metadata:
             note = f"Truncated from slice {start} to {end}"
             self.ome_metadata += f"\n<!-- {note} -->\n"
+        self._touch_image_revision()
+        if self.masks is not None:
+            self._touch_mask_revision()
 
     def save_stack(self, path: str) -> None:
         """Save current image stack with OME metadata if available."""

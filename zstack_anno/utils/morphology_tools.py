@@ -3,6 +3,7 @@ import time
 import numpy as np
 import warnings
 import logging
+from dataclasses import dataclass
 from typing import Callable
 
 logger = logging.getLogger(__name__)
@@ -106,13 +107,27 @@ except Exception as exc:  # pragma: no cover - optional dependency
     logger.warning("SimpleITK import failed: %s", exc)
     sitk = None  # type: ignore
 
-try:  # optional dependency
-    import cv2  # type: ignore
-    ximgproc = getattr(cv2, "ximgproc", None)
-except Exception as exc:  # pragma: no cover - optional dependency
-    logger.warning("cv2 import failed: %s", exc)
-    cv2 = None  # type: ignore
-    ximgproc = None  # type: ignore
+cv2 = None  # type: ignore
+ximgproc = None  # type: ignore
+_cv2_load_attempted = False
+
+
+def _ensure_cv2():
+    """Import OpenCV lazily so it does not override Qt plugin paths at startup."""
+    global cv2, ximgproc, _cv2_load_attempted
+    if _cv2_load_attempted:
+        return cv2, ximgproc
+    _cv2_load_attempted = True
+    try:  # pragma: no cover - optional dependency
+        import cv2 as _cv2  # type: ignore
+    except Exception as exc:
+        logger.warning("cv2 import failed: %s", exc)
+        cv2 = None  # type: ignore
+        ximgproc = None  # type: ignore
+    else:
+        cv2 = _cv2  # type: ignore
+        ximgproc = getattr(_cv2, "ximgproc", None)  # type: ignore
+    return cv2, ximgproc
 
 try:  # optional dependency
     from ridge_detector import RidgeDetector
@@ -135,6 +150,23 @@ if nd_binary_dilation is None or sk_binary_dilation is None:
     )
 
 _START_TIMES: dict[tuple[str, int | None], float] = {}
+
+
+@dataclass(frozen=True)
+class ComponentFilterStats:
+    min_size: int
+    total_components: int
+    removed_components: int
+    kept_components: int
+    total_voxels: int
+    removed_voxels: int
+    kept_voxels: int
+
+    @property
+    def removed_component_percent(self) -> float:
+        if self.total_components <= 0:
+            return 0.0
+        return 100.0 * float(self.removed_components) / float(self.total_components)
 
 
 def _print_progress(
@@ -266,9 +298,21 @@ def erode(mask: np.ndarray, iterations: int = 1) -> np.ndarray:
 
 
 def label_components(mask: np.ndarray) -> np.ndarray:
-    """Label connected components in a binary mask."""
+    """Label connected components in a binary 2-D or 3-D mask."""
+    binary = np.asarray(mask) > 0
+    if binary.ndim not in (2, 3):
+        raise ValueError(f"label_components expects a 2-D or 3-D mask, got ndim={binary.ndim}")
+    if nd_label is not None:
+        labeled, _count = nd_label(binary)
+        return labeled.astype(np.int32, copy=False)
     if label is not None:
-        return label(mask > 0, connectivity=1)
+        return label(binary, connectivity=1).astype(np.int32, copy=False)
+    if binary.ndim == 2:
+        return _label_components_fallback_2d(binary)
+    return _label_components_fallback_3d(binary)
+
+
+def _label_components_fallback_2d(mask: np.ndarray) -> np.ndarray:
     h, w = mask.shape
     labels = np.zeros((h, w), dtype=np.int32)
     current = 0
@@ -293,6 +337,34 @@ def label_components(mask: np.ndarray) -> np.ndarray:
     return labels
 
 
+def _label_components_fallback_3d(mask: np.ndarray) -> np.ndarray:
+    depth, height, width = mask.shape
+    labels = np.zeros((depth, height, width), dtype=np.int32)
+    current = 0
+    neighbors = ((-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1))
+    for z in range(depth):
+        for y in range(height):
+            for x in range(width):
+                if mask[z, y, x] and labels[z, y, x] == 0:
+                    current += 1
+                    stack = [(z, y, x)]
+                    labels[z, y, x] = current
+                    while stack:
+                        cz, cy, cx = stack.pop()
+                        for dz, dy, dx in neighbors:
+                            nz, ny, nx = cz + dz, cy + dy, cx + dx
+                            if (
+                                0 <= nz < depth
+                                and 0 <= ny < height
+                                and 0 <= nx < width
+                                and mask[nz, ny, nx]
+                                and labels[nz, ny, nx] == 0
+                            ):
+                                labels[nz, ny, nx] = current
+                                stack.append((nz, ny, nx))
+    return labels
+
+
 def dilate_stack(stack: np.ndarray, iterations: int = 1) -> np.ndarray:
     return np.stack([dilate(slice_, iterations) for slice_ in stack])
 
@@ -303,22 +375,102 @@ def erode_stack(stack: np.ndarray, iterations: int = 1) -> np.ndarray:
 
 def remove_small(mask: np.ndarray, min_size: int) -> np.ndarray:
     """Remove connected components smaller than ``min_size``."""
-    if remove_small_objects is not None:
-        result = remove_small_objects(mask > 0, min_size=min_size)
-        return result.astype(mask.dtype)
-    labels = label_components(mask)
-    if labels.max() == 0:
-        return mask.copy()
-    result = mask.copy()
-    for lbl in range(1, labels.max() + 1):
-        if np.sum(labels == lbl) < min_size:
-            result[labels == lbl] = 0
-    return result
+    filtered, _labels, _stats = remove_small_components_with_stats(mask, min_size)
+    return filtered
 
 
 def remove_small_stack(stack: np.ndarray, min_size: int) -> np.ndarray:
-    """Apply ``remove_small`` to every slice of a stack."""
-    return np.stack([remove_small(slice_, min_size) for slice_ in stack])
+    """Remove small connected components from a whole 3-D stack."""
+    filtered, _labels, _stats = remove_small_components_with_stats(stack, min_size)
+    return filtered
+
+
+def remove_small_components(
+    mask: np.ndarray,
+    min_size: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    filtered, labels, _stats = remove_small_components_with_stats(mask, min_size)
+    return filtered, labels
+
+
+def remove_small_components_with_stats(
+    mask: np.ndarray,
+    min_size: int,
+) -> tuple[np.ndarray, np.ndarray, ComponentFilterStats]:
+    """Filter 2-D/3-D connected components and return filtered mask plus compact labels."""
+    arr = np.asarray(mask)
+    if arr.ndim not in (2, 3):
+        raise ValueError(f"remove_small_components expects a 2-D or 3-D mask, got ndim={arr.ndim}")
+    min_size = max(0, int(min_size))
+    binary = arr > 0
+    total_voxels = int(binary.sum())
+    if not binary.any():
+        labels = np.zeros(arr.shape, dtype=np.int32)
+        stats = ComponentFilterStats(
+            min_size=min_size,
+            total_components=0,
+            removed_components=0,
+            kept_components=0,
+            total_voxels=0,
+            removed_voxels=0,
+            kept_voxels=0,
+        )
+        return np.zeros_like(arr, dtype=arr.dtype), labels, stats
+
+    labels = label_components(binary.astype(np.uint8))
+    total_components = int(labels.max())
+    counts = np.bincount(labels.ravel())
+
+    if min_size <= 1:
+        stats = ComponentFilterStats(
+            min_size=min_size,
+            total_components=total_components,
+            removed_components=0,
+            kept_components=total_components,
+            total_voxels=total_voxels,
+            removed_voxels=0,
+            kept_voxels=total_voxels,
+        )
+        return binary.astype(arr.dtype), labels, stats
+
+    keep = counts >= min_size
+    keep[0] = False
+    if labels.max() == 0:
+        filtered_labels = np.zeros(arr.shape, dtype=np.int32)
+        stats = ComponentFilterStats(
+            min_size=min_size,
+            total_components=0,
+            removed_components=0,
+            kept_components=0,
+            total_voxels=0,
+            removed_voxels=0,
+            kept_voxels=0,
+        )
+        return np.zeros_like(arr, dtype=arr.dtype), filtered_labels, stats
+    kept_labels = np.flatnonzero(keep)
+    kept_components = int(kept_labels.size)
+    removed_components = int(total_components - kept_components)
+    kept_voxels = int(counts[kept_labels].sum()) if kept_labels.size else 0
+    removed_voxels = int(total_voxels - kept_voxels)
+    stats = ComponentFilterStats(
+        min_size=min_size,
+        total_components=total_components,
+        removed_components=removed_components,
+        kept_components=kept_components,
+        total_voxels=total_voxels,
+        removed_voxels=removed_voxels,
+        kept_voxels=kept_voxels,
+    )
+    if np.all(keep[1:]):
+        return binary.astype(arr.dtype, copy=False), labels.astype(np.int32, copy=False), stats
+    compact = np.zeros_like(counts, dtype=np.int32)
+    if kept_labels.size:
+        compact[kept_labels] = np.arange(1, kept_labels.size + 1, dtype=np.int32)
+        filtered_labels = compact[labels]
+        filtered = (filtered_labels > 0).astype(arr.dtype, copy=False)
+        return filtered, filtered_labels.astype(np.int32, copy=False), stats
+    filtered_labels = np.zeros(arr.shape, dtype=np.int32)
+    return np.zeros_like(arr, dtype=arr.dtype), filtered_labels, stats
 
 
 def close(mask: np.ndarray, strength: int = 1) -> np.ndarray:
@@ -1005,9 +1157,10 @@ def meijering_filter_slice(
 
 def opencv_ridge_filter_slice(slice_: np.ndarray) -> np.ndarray:
     """Detect ridges using OpenCV's RidgeDetectionFilter."""
-    if cv2 is None or ximgproc is None or not hasattr(ximgproc, "RidgeDetectionFilter_create"):
+    cv2_mod, ximgproc_mod = _ensure_cv2()
+    if cv2_mod is None or ximgproc_mod is None or not hasattr(ximgproc_mod, "RidgeDetectionFilter_create"):
         return slice_.astype(float)
-    filt = ximgproc.RidgeDetectionFilter_create()
+    filt = ximgproc_mod.RidgeDetectionFilter_create()
     return filt.getRidgeFilteredImage(slice_)
 
 
@@ -1111,10 +1264,11 @@ def cv_gabor_filter_slice(
     psi: float = 0.0,
 ) -> np.ndarray:
     """Apply OpenCV Gabor kernel filtering."""
-    if cv2 is None:
+    cv2_mod, _ = _ensure_cv2()
+    if cv2_mod is None:
         return slice_.astype(float)
-    kernel = cv2.getGaborKernel((ksize, ksize), sigma, theta, lambd, gamma, psi)
-    return cv2.filter2D(slice_.astype(float), -1, kernel)
+    kernel = cv2_mod.getGaborKernel((ksize, ksize), sigma, theta, lambd, gamma, psi)
+    return cv2_mod.filter2D(slice_.astype(float), -1, kernel)
 
 
 def structure_tensor_eigen_slice(slice_: np.ndarray, sigma: float = 1.0) -> np.ndarray:

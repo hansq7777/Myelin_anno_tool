@@ -12,7 +12,7 @@ if str(root) not in sys.path:
 np_spec = importlib.util.find_spec("numpy")
 if np_spec is None:
     pytest.skip("numpy not available", allow_module_level=True)
-if "tifffile" not in sys.modules:
+if importlib.util.find_spec("tifffile") is None and "tifffile" not in sys.modules:
     sys.modules["tifffile"] = types.ModuleType("tifffile")
 
 from zstack_anno.models.zstack_model import ZStackModel
@@ -74,6 +74,18 @@ def test_update_components():
     assert labels.max() == 2
 
 
+def test_update_components_uses_3d_connectivity_across_slices():
+    model = ZStackModel()
+    model.data = np.zeros((2, 3, 3), dtype=np.uint8)
+    model.ensure_masks()
+    model.masks[0, 1, 1] = 1
+    model.masks[1, 1, 1] = 1
+    model.update_components()
+
+    assert model.components.max() == 1
+    assert model.components[0, 1, 1] == model.components[1, 1, 1]
+
+
 def test_counts():
     model = ZStackModel()
     model.data = np.zeros((2, 2, 2), dtype=np.uint8)
@@ -82,7 +94,22 @@ def test_counts():
     model.set_mask(mask0, slice_idx=0)
     model.set_mask(mask1, slice_idx=1)
     assert model.total_pixel_count() == 4
-    assert model.component_count() >= 1
+    assert model.component_count() == 2
+
+
+def test_replace_masks_reuses_precomputed_components():
+    model = ZStackModel()
+    model.data = np.zeros((2, 3, 3), dtype=np.uint8)
+    masks = np.zeros((2, 3, 3), dtype=np.uint8)
+    masks[:, 1, 1] = 1
+    components = np.zeros((2, 3, 3), dtype=np.int32)
+    components[:, 1, 1] = 1
+
+    model.replace_masks(masks, components=components, dirty=True)
+
+    assert np.array_equal(model.masks, masks)
+    assert np.array_equal(model.components, components)
+    assert model.component_count() == 1
 
 
 def test_blur_and_stretch_are_absolute():
@@ -193,3 +220,32 @@ def test_delete_components_touching_rect_reports_change():
 
     no_change = model.delete_components_touching_rect(0, 0, 0, 1, 1)
     assert no_change is False
+
+
+def test_delete_components_touching_rect_clamps_out_of_bounds():
+    model = ZStackModel()
+    model.data = np.zeros((1, 4, 4), dtype=np.uint8)
+    model.ensure_masks()
+    mask = np.array(
+        [
+            [1, 1, 0, 0],
+            [1, 1, 0, 0],
+            [0, 0, 1, 1],
+            [0, 0, 1, 1],
+        ],
+        dtype=np.uint8,
+    )
+    model.set_mask(mask, slice_idx=0)
+
+    changed = model.delete_components_touching_rect(0, -10, -10, 2, 2)
+    assert changed is True
+    expected = np.array(
+        [
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+            [0, 0, 1, 1],
+            [0, 0, 1, 1],
+        ],
+        dtype=np.uint8,
+    )
+    assert np.array_equal(model.get_mask(0), expected)

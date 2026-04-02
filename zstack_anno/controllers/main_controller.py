@@ -2,6 +2,7 @@ from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
     QSlider,
+    QSplitter,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -14,8 +15,9 @@ from PyQt5.QtWidgets import (
     QInputDialog,
     QComboBox,
     QSizePolicy,
+    QRubberBand,
 )
-from PyQt5.QtCore import Qt, QEvent, QPoint
+from PyQt5.QtCore import Qt, QEvent, QPoint, QRect, QTimer
 from PyQt5.QtGui import QCursor, QPixmap, QPainter, QPen, QColor
 import threading
 import sys
@@ -23,6 +25,7 @@ import os
 import numpy as np
 from ..models.zstack_model import ZStackModel
 from ..views.canvas import SliceCanvas
+from ..views.inline_volume_preview import InlineVolumePreview, VIEW_MODE_LABELS
 from ..views.script_editor import ScriptEditor
 from ..views.comparison_dialog import ComparisonDialog
 from ..views.validation_dialog import ValidationDialog
@@ -30,12 +33,20 @@ from ..utils import morphology_tools
 from ..utils.dialogs import question_with_shortcuts
 from ..utils import config
 from .file_helper import FileOpsMixin
-from .morphology_helper import MorphologyMixin, IntGrowThread
+from .morphology_helper import MorphologyMixin, IntGrowThread, FilterSmall3DThread
 from .script_helper import ScriptMixin
 from .review_helper import ReviewMixin
+from .volume_helper import VolumeMixin
 
 
-class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, ReviewMixin):
+class MainController(
+    QMainWindow,
+    FileOpsMixin,
+    MorphologyMixin,
+    ScriptMixin,
+    ReviewMixin,
+    VolumeMixin,
+):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Z-Stack Annotation (alpha)")
@@ -46,14 +57,19 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         self.history: list[str] = []
         # Brush tool settings
         self.brush_enabled: bool = False
-        self.brush_erase: bool = False
         self.brush_size: int = 5
         self._painting: bool = False
+        self._painting_value: int | None = None
         self._last_pos = None
         self._temp_mask = None
-        self._delete_start = None
+        self._delete_hold = False
+        self._delete_drag_start = None
         self.cancel_event = threading.Event()
         self.grow_thread: IntGrowThread | None = None
+        self.filter_thread: FilterSmall3DThread | None = None
+        self._filter_request_seq: int = 0
+        self._active_filter_request_id: int | None = None
+        self._pending_filter_undo_mask: np.ndarray | None = None
         self.script_editor: ScriptEditor | None = None
         self._quick_auto_snapshot_masks: np.ndarray | None = None
         self._quick_auto_snapshot_index: int = 0
@@ -76,6 +92,18 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         self.slider.installEventFilter(self)
         self.title_label.installEventFilter(self)
         self.menuBar().installEventFilter(self)
+        self._delete_band = QRubberBand(QRubberBand.Rectangle, self.canvas.viewport())
+        self._delete_band.setStyleSheet(
+            "border: 2px solid rgba(255, 80, 80, 220);"
+            "background-color: rgba(255, 80, 80, 45);"
+        )
+        self._delete_band.hide()
+        self._inline_volume_enabled = False
+        self._inline_preview_timer = QTimer(self)
+        self._inline_preview_timer.setSingleShot(True)
+        self._inline_preview_timer.timeout.connect(self._refresh_inline_volume_preview)
+        self._last_canvas_cursor_voxel: tuple[int, int] | None = None
+        self._inline_preview_volume_signature: tuple | None = None
 
     def _build_layout(self):
         central = QWidget()
@@ -94,9 +122,18 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         self.slider.valueChanged.connect(self._on_slice_changed)
         self.next_btn = QPushButton("Next")
         self.next_btn.clicked.connect(self._next_slice)
+        self.inline_volume_chk = QCheckBox("3D Visualization")
+        self.inline_volume_chk.toggled.connect(self._toggle_inline_volume_preview)
+        self.inline_view_combo = QComboBox()
+        for mode, label in VIEW_MODE_LABELS:
+            self.inline_view_combo.addItem(label, mode)
+        self.inline_view_combo.currentIndexChanged.connect(self._on_inline_view_changed)
+        self.inline_view_combo.setEnabled(False)
         nav_layout.addWidget(self.prev_btn)
         nav_layout.addWidget(self.slider)
         nav_layout.addWidget(self.next_btn)
+        nav_layout.addWidget(self.inline_volume_chk)
+        nav_layout.addWidget(self.inline_view_combo)
         layout.addLayout(nav_layout)
 
         review_layout = QHBoxLayout()
@@ -159,7 +196,16 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         layout.addLayout(review_layout)
         self._set_review_controls_enabled(False)
 
-        layout.addWidget(self.canvas)
+        self.inline_volume_preview = InlineVolumePreview()
+        self.inline_volume_preview.hide()
+        self.center_splitter = QSplitter(Qt.Horizontal)
+        self.center_splitter.setChildrenCollapsible(False)
+        self.center_splitter.addWidget(self.inline_volume_preview)
+        self.center_splitter.addWidget(self.canvas)
+        self.center_splitter.setStretchFactor(0, 0)
+        self.center_splitter.setStretchFactor(1, 1)
+        self.center_splitter.setSizes([0, 1000])
+        layout.addWidget(self.center_splitter, 1)
         # -------- Controls --------
         ctrl = QHBoxLayout()
 
@@ -447,6 +493,12 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         # Ctrl+T is mapped to Command+T automatically on macOS, so include
         # it alongside Alt/Meta for cross-platform compatibility.
         validate_act.setShortcuts(["Alt+T", "Ctrl+T", "Meta+T"])
+        current_3d_act = tool_menu.addAction("3D Inspector (Current Stack)")
+        current_3d_act.triggered.connect(self._open_volume_inspector_current)
+        current_3d_act.setShortcuts(["Alt+G", "Ctrl+G", "Meta+G"])
+        matching_3d_act = tool_menu.addAction("3D Inspector (Matching Inference)")
+        matching_3d_act.triggered.connect(self._open_volume_inspector_matching)
+        matching_3d_act.setShortcuts(["Alt+Shift+G", "Ctrl+Shift+G", "Meta+Shift+G"])
 
         review_menu = self.menuBar().addMenu("Review")
         review_build_act = review_menu.addAction("Build Tracker from Folders…")
@@ -482,6 +534,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
 
     def closeEvent(self, event):
         if self._prompt_save_if_dirty():
+            self._close_volume_windows()
             config.save()
             super().closeEvent(event)
         else:
@@ -523,11 +576,15 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         if hasattr(self, "info_label"):
             self.info_label.setText(info)
         self._update_file_labels()
+        self._schedule_inline_volume_preview_refresh()
+        self._refresh_inline_volume_locator()
 
     def _update_cursor_label(self, pos) -> None:
         """Update cursor position and pixel value label."""
         if self.model.data is None or self.model.original_data is None:
             self.cursor_label.setText("")
+            self._last_canvas_cursor_voxel = None
+            self._refresh_inline_volume_locator()
             return
         scene_pos = self.canvas.mapToScene(pos)
         x = int(scene_pos.x())
@@ -536,8 +593,89 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
             val = int(img[y, x])
             self.cursor_label.setText(f"Pos: ({x}, {y})  Value: {val}")
+            self._last_canvas_cursor_voxel = (x, y)
         else:
             self.cursor_label.setText("")
+            self._last_canvas_cursor_voxel = None
+        self._refresh_inline_volume_locator()
+
+    def _toggle_inline_volume_preview(self, enabled: bool) -> None:
+        self._inline_volume_enabled = bool(enabled)
+        self.inline_volume_preview.setVisible(self._inline_volume_enabled)
+        self.inline_view_combo.setEnabled(self._inline_volume_enabled)
+        if not self._inline_volume_enabled:
+            self._inline_preview_timer.stop()
+            self.inline_volume_preview.clear_preview()
+            self._inline_preview_volume_signature = None
+            self.center_splitter.setSizes([0, max(1, self.center_splitter.width())])
+            return
+        total = max(sum(self.center_splitter.sizes()), self.center_splitter.width(), 960)
+        left = max(300, total // 3)
+        self.center_splitter.setSizes([left, max(420, total - left)])
+        self._schedule_inline_volume_preview_refresh(delay_ms=10)
+
+    def _on_inline_view_changed(self, _index: int) -> None:
+        if not getattr(self, "_inline_volume_enabled", False):
+            return
+        self._schedule_inline_volume_preview_refresh(delay_ms=10)
+
+    def _schedule_inline_volume_preview_refresh(self, *, delay_ms: int = 80) -> None:
+        if not getattr(self, "_inline_volume_enabled", False):
+            return
+        self._inline_preview_timer.start(max(0, int(delay_ms)))
+
+    def _current_spacing_xyz(self) -> tuple[float, float, float]:
+        return self.model.get_pixel_sizes() or (1.0, 1.0, 1.0)
+
+    def _refresh_inline_volume_preview(self) -> None:
+        if not getattr(self, "_inline_volume_enabled", False):
+            return
+        raw = self.model.original_data if self.model.original_data is not None else self.model.data
+        if raw is None:
+            self.inline_volume_preview.clear_preview()
+            self._inline_preview_volume_signature = None
+            return
+        view_mode = self.inline_view_combo.currentData() or "oblique"
+        spacing = self._current_spacing_xyz()
+        volume_signature = (
+            int(self.model.image_revision),
+            int(self.model.mask_revision),
+            int(id(raw)),
+            int(id(self.model.masks)),
+            tuple(int(v) for v in raw.shape),
+            None if self.model.masks is None else tuple(int(v) for v in self.model.masks.shape),
+            tuple(round(float(v), 6) for v in spacing),
+        )
+        if volume_signature != self._inline_preview_volume_signature:
+            self.inline_volume_preview.set_view_mode(view_mode, render_if_ready=False)
+            self.inline_volume_preview.set_volume(
+                raw,
+                self.model.masks,
+                spacing,
+                cache_key=volume_signature,
+            )
+            self._inline_preview_volume_signature = volume_signature
+        else:
+            self.inline_volume_preview.set_view_mode(view_mode)
+        self._refresh_inline_volume_locator()
+
+    def _refresh_inline_volume_locator(self) -> None:
+        if not getattr(self, "_inline_volume_enabled", False):
+            return
+        if self.model.data is None:
+            self.inline_volume_preview.clear_preview()
+            return
+        spacing = self._current_spacing_xyz()
+        self.inline_volume_preview.set_current_slice(self.model.index, spacing)
+        if self._last_canvas_cursor_voxel is None:
+            self.inline_volume_preview.clear_locator()
+            return
+        x, y = self._last_canvas_cursor_voxel
+        img = self.model.get_original_slice()
+        if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
+            self.inline_volume_preview.set_locator(x, y, self.model.index, spacing)
+        else:
+            self.inline_volume_preview.clear_locator()
 
     def _progress_update(self, cur: int, total: int, mask: np.ndarray | None = None) -> None:
         if mask is None or total == 0:
@@ -576,7 +714,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
     # --------- 文件操作 ---------
 
     # 键盘快捷
-    def _handle_key(self, event):
+    def _handle_key_press(self, event):
         if not self.slider.isEnabled():
             return
         if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_Period:
@@ -616,8 +754,12 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         elif event.key() == Qt.Key_D:
             if event.modifiers() in (Qt.AltModifier, Qt.MetaModifier):
                 self._clear_foreground()
-            else:
-                self._dilate_current()
+            elif not event.isAutoRepeat():
+                if self._painting:
+                    self._end_paint()
+                self._delete_hold = True
+                self._sync_tool_cursor()
+                self.statusBar().showMessage("Delete component(s): click or drag")
         elif event.key() == Qt.Key_E:
             self._erode_current()
         elif event.key() == Qt.Key_Z:
@@ -625,34 +767,42 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         elif event.key() == Qt.Key_X:
             self._redo()
         elif event.key() == Qt.Key_P:
+            if event.isAutoRepeat():
+                return
+            if self._painting:
+                self._end_paint()
             self.brush_enabled = not self.brush_enabled
-            self._sync_brush_cursor()
-            if self.brush_enabled:
-                mode = "Eraser" if self.brush_erase else "Brush"
-                self.statusBar().showMessage(f"{mode} ON")
-            else:
-                self.statusBar().showMessage("Brush OFF")
-        elif event.key() == Qt.Key_L:
-            if not self.brush_enabled:
-                self.brush_enabled = True
-                self.brush_erase = True
-            else:
-                self.brush_erase = not self.brush_erase
-            self._sync_brush_cursor()
+            self._sync_tool_cursor()
             self.statusBar().showMessage(
-                "Eraser ON" if self.brush_erase else "Brush ON"
+                "Brush ON: left add, right erase" if self.brush_enabled else "Brush OFF"
             )
         elif event.key() == Qt.Key_H:
+            if event.isAutoRepeat():
+                return
+            if self._painting:
+                self._end_paint()
             self.brush_enabled = False
             self.canvas.setDragMode(self.canvas.ScrollHandDrag)
-            self._sync_brush_cursor()
+            self._sync_tool_cursor()
             self.statusBar().showMessage("Hand tool")
         elif event.key() == Qt.Key_BracketLeft:
             self.brush_size = max(1, self.brush_size - 1)
-            self._sync_brush_cursor()
+            self._sync_tool_cursor()
         elif event.key() == Qt.Key_BracketRight:
             self.brush_size += 1
-            self._sync_brush_cursor()
+            self._sync_tool_cursor()
+
+    def _handle_key_release(self, event) -> None:
+        if not self.slider.isEnabled():
+            return
+        if event.key() == Qt.Key_D and self._delete_hold and not event.isAutoRepeat():
+            self._delete_hold = False
+            if self._delete_drag_start is None:
+                self._sync_tool_cursor()
+                if self.brush_enabled:
+                    self.statusBar().showMessage("Brush ON: left add, right erase")
+                else:
+                    self.statusBar().showMessage("Ready")
 
 
     def report_action(self, action: str, params: dict) -> None:
@@ -675,7 +825,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
                 self.model.histogram_stretch(last_stretch)
         else:
             if last_mask is not None:
-                self.model.masks = last_mask
+                self.model.replace_masks(last_mask, dirty=True)
         if self.history:
             self.history.pop()
         self._update_view()
@@ -693,7 +843,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
                 self.model.histogram_stretch(last_stretch)
         else:
             if last_mask is not None:
-                self.model.masks = last_mask
+                self.model.replace_masks(last_mask, dirty=True)
         self.history.append(action)
         self._update_view()
 
@@ -714,32 +864,49 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             self._toggle_window_fit_screen()
             return True
         if event.type() == QEvent.KeyPress:
-            self._handle_key(event)
+            self._handle_key_press(event)
+            return True
+        if event.type() == QEvent.KeyRelease:
+            self._handle_key_release(event)
             return True
         if obj in (self.canvas, self.canvas.viewport()) and event.type() == QEvent.MouseMove:
             self._update_cursor_label(event.pos())
         if (
-            self.brush_enabled
-            and obj in (self.canvas, self.canvas.viewport())
+            obj in (self.canvas, self.canvas.viewport())
+            and self._delete_tool_active()
             and event.type() in (QEvent.MouseButtonPress, QEvent.MouseMove, QEvent.MouseButtonRelease)
         ):
             if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-                self._start_paint(event.pos())
+                self._start_delete_drag(event.pos())
                 return True
-            if event.type() == QEvent.MouseMove and event.buttons() & Qt.LeftButton:
+            if (
+                event.type() == QEvent.MouseMove
+                and self._delete_drag_start is not None
+                and event.buttons() & Qt.LeftButton
+            ):
+                self._update_delete_drag(event.pos())
+                return True
+            if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                self._finish_delete_drag(event.pos())
+                return True
+        if (
+            self.brush_enabled
+            and not self._delete_tool_active()
+            and obj in (self.canvas, self.canvas.viewport())
+            and event.type() in (QEvent.MouseButtonPress, QEvent.MouseMove, QEvent.MouseButtonRelease)
+        ):
+            if event.type() == QEvent.MouseButtonPress and event.button() in (Qt.LeftButton, Qt.RightButton):
+                self._start_paint(event.pos(), 1 if event.button() == Qt.LeftButton else 0)
+                return True
+            if (
+                event.type() == QEvent.MouseMove
+                and self._painting
+                and event.buttons() & (Qt.LeftButton | Qt.RightButton)
+            ):
                 self._continue_paint(event.pos())
                 return True
-            if event.type() == QEvent.MouseButtonRelease:
+            if event.type() == QEvent.MouseButtonRelease and event.button() in (Qt.LeftButton, Qt.RightButton):
                 self._end_paint()
-                return True
-        if obj in (self.canvas, self.canvas.viewport()):
-            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.RightButton:
-                self._delete_start = event.pos()
-                return True
-            if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.RightButton:
-                if self._delete_start is not None:
-                    self._delete_rect(self._delete_start, event.pos())
-                    self._delete_start = None
                 return True
         return super().eventFilter(obj, event)
 
@@ -761,19 +928,21 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         yy, xx = np.ogrid[y0:y1, x0:x1]
         radius = max(1.0, self.brush_size / 2.0)
         circle = (yy - y) ** 2 + (xx - x) ** 2 <= radius ** 2
-        value = 0 if self.brush_erase else 1
+        value = 0 if self._painting_value == 0 else 1
         patch = mask[y0:y1, x0:x1]
         patch[circle] = value
         mask[y0:y1, x0:x1] = patch
         self.canvas.set_mask(mask)
 
-    def _start_paint(self, pos) -> None:
+    def _start_paint(self, pos, value: int) -> None:
         if self._painting:
             return
         self._push_undo("paint")
         self._painting = True
+        self._painting_value = 1 if value > 0 else 0
         self._last_pos = pos
         self._temp_mask = self.model.get_mask().copy()
+        self._sync_tool_cursor()
         self._paint_at(pos)
 
     def _continue_paint(self, pos) -> None:
@@ -792,7 +961,9 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             self.model.set_mask(self._temp_mask)
         self._temp_mask = None
         self._last_pos = None
+        self._painting_value = None
         self._update_view()
+        self._sync_tool_cursor()
 
     def _paint_line(self, start, end) -> None:
         """Interpolate between points to draw a continuous line."""
@@ -811,21 +982,50 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         """Delete entire components that touch the dragged rectangle."""
         if self.model.masks is None:
             return
-        self._push_undo("delete_rect")
         scene_start = self.canvas.mapToScene(start)
         scene_end = self.canvas.mapToScene(end)
         x0 = int(min(scene_start.x(), scene_end.x()))
         x1 = int(max(scene_start.x(), scene_end.x())) + 1
         y0 = int(min(scene_start.y(), scene_end.y()))
         y1 = int(max(scene_start.y(), scene_end.y())) + 1
+        self._push_undo("delete_rect")
         changed = self.model.delete_components_touching_rect(self.model.index, x0, y0, x1, y1)
         if not changed:
-            if self.undo_stack:
-                self.undo_stack.pop()
-            if self.history:
-                self.history.pop()
+            self._discard_last_undo()
             return
         self._update_view()
+
+    def _discard_last_undo(self) -> None:
+        if self.undo_stack:
+            self.undo_stack.pop()
+        if self.history:
+            self.history.pop()
+
+    def _delete_tool_active(self) -> bool:
+        return self._delete_hold or self._delete_drag_start is not None
+
+    def _start_delete_drag(self, pos) -> None:
+        if self.model.masks is None:
+            return
+        self._delete_drag_start = QPoint(pos)
+        self._delete_band.setGeometry(QRect(self._delete_drag_start, self._delete_drag_start))
+        self._delete_band.show()
+        self._sync_tool_cursor()
+
+    def _update_delete_drag(self, pos) -> None:
+        if self._delete_drag_start is None:
+            return
+        self._delete_band.setGeometry(QRect(self._delete_drag_start, pos).normalized())
+
+    def _finish_delete_drag(self, pos) -> None:
+        if self._delete_drag_start is None:
+            return
+        start = QPoint(self._delete_drag_start)
+        self._update_delete_drag(pos)
+        self._delete_band.hide()
+        self._delete_drag_start = None
+        self._delete_rect(start, pos)
+        self._sync_tool_cursor()
 
     # --------- additional utilities ---------
     def _on_close_window(self) -> None:
@@ -839,24 +1039,11 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
     def toggle_select_mode(self) -> None:
         """Toggle the brush selection mode."""
         self.brush_enabled = not self.brush_enabled
-        self._sync_brush_cursor()
+        self._sync_tool_cursor()
 
     def _delete_single_area(self, pos) -> None:
         """Delete the component under a clicked position."""
-        if self.model.masks is None:
-            return
-        self._push_undo("delete_single")
-        scene_pos = self.canvas.mapToScene(pos)
-        x = int(scene_pos.x())
-        y = int(scene_pos.y())
-        changed = self.model.delete_components_touching_rect(self.model.index, x, y, x + 1, y + 1)
-        if not changed:
-            if self.undo_stack:
-                self.undo_stack.pop()
-            if self.history:
-                self.history.pop()
-            return
-        self._update_view()
+        self._delete_rect(pos, pos)
 
     def on_scroll(self, delta: int) -> None:
         """Scroll through slices using mouse wheel delta."""
@@ -881,14 +1068,17 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             "  Alt+Q - run quick auto script (seed->dilate->bg->grow->bg)\n"
             "  Alt+W - run quick auto on current stack/range\n"
             "  Alt+Shift+Q - revert to pre-auto snapshot\n"
-            "  D/E - dilate/erode current mask\n"
+            "  Alt+G - open 3D inspector for the current stack\n"
+            "  Alt+Shift+G - open 3D inspector with matching inference assets\n"
+            "  G (when 3D preview focused) - reset left 3D view to the selected base orientation\n"
+            "  D (hold) - click/drag delete connected component(s)\n"
+            "  E - erode current mask\n"
             "  Z/X - undo/redo\n"
             "  \u2318D or \u2325D - clear foreground on current slice\n"
-            "  P - toggle brush painting\n"
-            "  L - toggle eraser mode (brush paints background)\n"
+            "  P - toggle brush painting (left add / right erase)\n"
             "  [ and ] - change brush size\n"
             "  H - hand tool (panning)\n"
-            "  Right click drag - delete masks touching drag rectangle\n\n"
+            "  Hold D + left drag - box delete with preview\n\n"
             "Toolbar Buttons:\n"
             "  Prev/Next - move one slice backward or forward\n"
             "  Prev Stack/Next Stack - move between raw+prediction pairs from the review tracker\n"
@@ -901,7 +1091,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             "  Revert Auto Snapshot - restore mask state before the last auto run\n"
             "  Slider - jump to a specific slice index\n"
             "  Dilate/Erode/Skeleton - basic mask operations; Strength sets iteration count\n"
-            "  Filter </spin - remove small components by pixel count\n"
+            "  Filter </spin - remove small connected components by total 3D voxel count\n"
             "  Clear <= Slice - clear labels on current and all previous slices\n"
             "  Clear >= Slice - clear labels on current and all following slices\n"
             "  Threshold Abs/Norm - threshold by value or percentage\n"
@@ -915,6 +1105,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
             "Menus provide the same actions as the toolbar.\n"
             "Zoom with mouse wheel when over the image.\n"
             "Use Tools -> Script Editor to automate sequences of these actions.\n"
+            "Use Tools -> 3D Inspector to render raw stacks and prediction masks as an oblique 3D view.\n"
             "Use Review controls to classify stacks as A/B/C and save corrected masks.\n"
             "Saving corrected masks marks the item as completed."
         )
@@ -927,12 +1118,20 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
         if not self._capture_quick_auto_snapshot("single-slice quick auto"):
             return
         params = self._quick_auto_params_for_selected_preset()
-        metrics = self.script_quick_seed_dilate_bg_int_bg(show_status=False, **params)
+        metrics = self.script_quick_seed_dilate_bg_int_bg(
+            show_status=False,
+            push_undo=True,
+            **params,
+        )
         if metrics is None:
             return
         self._post_quick_auto_quality_gate(metrics, context_label="current slice")
 
-    def _sync_brush_cursor(self) -> None:
+    def _sync_tool_cursor(self) -> None:
+        if self._delete_tool_active():
+            self.canvas.setDragMode(self.canvas.NoDrag)
+            self.canvas.viewport().setCursor(self._make_delete_cursor())
+            return
         if not self.brush_enabled:
             self.canvas.viewport().unsetCursor()
             self.canvas.setDragMode(self.canvas.ScrollHandDrag)
@@ -949,13 +1148,30 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
 
         painter = QPainter(pix)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        color = QColor(255, 80, 80, 220) if self.brush_erase else QColor(0, 220, 120, 220)
+        color = QColor(255, 80, 80, 220) if self._painting_value == 0 else QColor(0, 220, 120, 220)
         painter.setPen(QPen(color, 2))
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(center - radius, center - radius, radius * 2, radius * 2)
         painter.setPen(QPen(color, 1))
         painter.drawLine(center - 3, center, center + 3, center)
         painter.drawLine(center, center - 3, center, center + 3)
+        painter.end()
+        return QCursor(pix, center, center)
+
+    def _make_delete_cursor(self) -> QCursor:
+        size = 24
+        center = size // 2
+        pix = QPixmap(size, size)
+        pix.fill(Qt.transparent)
+
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        color = QColor(255, 80, 80, 230)
+        painter.setPen(QPen(color, 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(4, 4, size - 8, size - 8)
+        painter.drawLine(center, 4, center, size - 4)
+        painter.drawLine(4, center, size - 4, center)
         painter.end()
         return QCursor(pix, center, center)
 
@@ -1114,9 +1330,7 @@ class MainController(QMainWindow, FileOpsMixin, MorphologyMixin, ScriptMixin, Re
                 "No snapshot available. Run Quick Auto first.",
             )
             return False
-        self.model.masks = self._quick_auto_snapshot_masks.copy()
-        self.model.update_components()
-        self.model.mask_dirty = True
+        self.model.replace_masks(self._quick_auto_snapshot_masks.copy(), dirty=True)
         target_index = max(0, min(self.model.n_slices - 1, self._quick_auto_snapshot_index))
         self.model.index = target_index
         if self.slider.isEnabled():

@@ -90,6 +90,15 @@ The **Tools** menu also includes:
   optional grid search) and compare overlays/metrics across slices.
 - **Validation Viewer**: view predicted masks vs ground truth with TP/FP/FN
   overlays and whole-stack statistics.
+- **3D Inspector (Current Stack / Matching Inference)**: open a PyVista/VTK
+  viewer for oblique-angle rendering of a raw z-stack with surface overlays for
+  predicted masks. The matching-inference variant auto-discovers sibling
+  `2.5D` nnUNet predictions and any 3D bundle assets it can find beside the raw
+  stack under `Confocal Myelin data/Inference`.
+
+The 3D inspector is intended for confocal review and presentation figure
+generation. It supports free rotation, orthogonal and oblique camera presets,
+opacity control for raw volume and mask surface, and screenshot export.
 
 ### Review workflow (raw + prediction QC)
 
@@ -185,10 +194,10 @@ Tracker columns are auto-created if missing:
 | `Alt+Shift+Q` | Revert to pre-auto snapshot |
 | `Alt+S` / `Ctrl+S` / `Meta+S` | Quick save masks |
 | `Alt+D` / `Meta+D` | Clear foreground on current slice |
-| `D` / `E` | Dilate / Erode |
+| Hold `D` + left click/drag | Delete connected component(s) under cursor/box |
+| `E` | Erode |
 | `Z` / `X` | Undo / Redo |
-| `P` | Toggle brush mode |
-| `L` | Toggle eraser mode (paint background) |
+| `P` | Toggle brush mode (`Left` add / `Right` erase) |
 | `[` / `]` | Brush size down/up |
 | `H` | Hand tool (panning) |
 
@@ -250,11 +259,12 @@ instrument models and acquisition settings.
 
 ### Shortcuts
 
-- `P` – toggle brush painting
+- `P` – toggle brush painting (`Left` add / `Right` erase)
+- Hold `D` + left click – delete the connected component under the cursor
+- Hold `D` + left drag – preview a box and delete every connected component touching it
 - `[` and `]` – change brush size
 - `H` – switch to hand tool (panning)
 - Arrow keys – navigate slices
-- Right click drag – delete masks touching the selection rectangle
 - `⌘S` (macOS) / `Alt+S` (Windows) – quick save masks
 - `⌘E` or `⌥E` (macOS) / `Alt+E` (Windows) – open the Script Editor
 - `⌘D` or `⌥D` (macOS) / `Alt+D` (Windows) – clear foreground on the current slice
