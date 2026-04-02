@@ -100,6 +100,20 @@ def test_build_preview_image_supports_multiple_view_modes(app):
         assert projection.box_norm_xy.shape == (8, 2)
 
 
+def test_select_raw_points_keeps_spatially_separated_structures(monkeypatch):
+    monkeypatch.setattr(inline_volume_preview, "_MAX_RAW_POINTS", 64)
+    raw = np.zeros((12, 72, 72), dtype=np.uint8)
+    raw[:, 6:24, 6:22] = 255
+    raw[:, 40:58, 48:64] = 175
+
+    points_xyz, intensity = inline_volume_preview._select_raw_points(raw, (1.0, 1.0, 1.0))
+
+    assert points_xyz.shape[0] <= 64
+    assert intensity.shape[0] == points_xyz.shape[0]
+    assert np.any(points_xyz[:, 0] < 24.0)
+    assert np.any(points_xyz[:, 0] > 42.0)
+
+
 def test_slice_canvas_wheel_zoom_uses_larger_step():
     canvas = SliceCanvas()
     canvas.resize(320, 320)
@@ -332,6 +346,41 @@ def test_main_controller_canvas_and_inline_zoom_stay_in_sync(app):
 
         assert widget.inline_volume_preview.zoom_factor() > preview_mid
         assert widget.canvas.zoom_factor() > canvas_mid
+    finally:
+        widget.model.mask_dirty = False
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()
+
+
+def test_main_controller_xy_inline_view_tracks_canvas_window(app):
+    widget = MainController()
+    try:
+        data = np.random.randint(0, 255, (12, 96, 96), dtype=np.uint8)
+        widget.model.data = data
+        widget.model.original_data = data.copy()
+        widget.model.ensure_masks()
+        widget.slider.setRange(0, data.shape[0] - 1)
+        widget.slider.setEnabled(True)
+        widget._update_view(reset_view=True)
+        widget.inline_volume_chk.setChecked(True)
+        app.processEvents()
+        widget._refresh_inline_volume_preview()
+        assert _wait_until(app, lambda: widget.inline_volume_preview._base_image is not None)
+
+        widget.canvas.apply_zoom_factor(1.8, emit_signal=True)
+        widget.canvas.horizontalScrollBar().setValue(widget.canvas.horizontalScrollBar().maximum() // 3)
+        widget.canvas.verticalScrollBar().setValue(widget.canvas.verticalScrollBar().maximum() // 4)
+        app.processEvents()
+
+        center_xy, visible_xy = widget.canvas.normalized_view_window()
+        preview_center = widget.inline_volume_preview._view_center_norm
+        expected_zoom = 1.0 / max(visible_xy)
+
+        assert widget.inline_volume_preview.view_mode() == "xy"
+        assert preview_center[0] == pytest.approx(center_xy[0], abs=0.05)
+        assert preview_center[1] == pytest.approx(center_xy[1], abs=0.05)
+        assert widget.inline_volume_preview.zoom_factor() == pytest.approx(expected_zoom, rel=0.08)
     finally:
         widget.model.mask_dirty = False
         widget.close()

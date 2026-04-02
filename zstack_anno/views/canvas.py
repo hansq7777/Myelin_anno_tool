@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene
 from PyQt5.QtGui import QPixmap, QImage, QTransform
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QRectF, QTimer, pyqtSignal
 import numpy as np
 
 _ZOOM_BASE = 1.2
@@ -11,6 +11,7 @@ _MAX_ZOOM = 24.0
 class SliceCanvas(QGraphicsView):
     """负责把 2-D ndarray 显示为灰度图，可拖拽缩放，并支持掩膜叠加。"""
     zoomAdjusted = pyqtSignal(float)
+    viewWindowChanged = pyqtSignal(float, float, float, float)
 
     def __init__(self) -> None:
         super().__init__()
@@ -27,6 +28,12 @@ class SliceCanvas(QGraphicsView):
         self._mask_item = None
         self._zoom = 1.0
         self._mask_opacity = 0.5  # default 50%
+        self._suspend_view_window_signal = False
+        self._view_window_timer = QTimer(self)
+        self._view_window_timer.setSingleShot(True)
+        self._view_window_timer.timeout.connect(self._emit_view_window_changed)
+        self.horizontalScrollBar().valueChanged.connect(self._emit_view_window_changed)
+        self.verticalScrollBar().valueChanged.connect(self._emit_view_window_changed)
 
     def set_image(self, arr: np.ndarray, reset_view: bool = False) -> None:
         """显示图像，支持灰度或 RGB."""
@@ -56,6 +63,7 @@ class SliceCanvas(QGraphicsView):
             self.resetTransform()
             self._zoom = 1.0
             self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+            self._schedule_view_window_changed()
 
     def zoom_factor(self) -> float:
         return float(self._zoom)
@@ -70,6 +78,7 @@ class SliceCanvas(QGraphicsView):
             return float(self._zoom)
         self._zoom = new_zoom
         self.scale(applied, applied)
+        self._schedule_view_window_changed()
         if emit_signal:
             self.zoomAdjusted.emit(applied)
         return float(self._zoom)
@@ -82,6 +91,47 @@ class SliceCanvas(QGraphicsView):
         factor = _ZOOM_BASE ** steps
         self.apply_zoom_factor(factor, emit_signal=True)
         event.accept()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._schedule_view_window_changed()
+
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.LeftButton:
+            self._emit_view_window_changed()
+
+    def normalized_view_window(self) -> tuple[tuple[float, float], tuple[float, float]]:
+        scene = self.sceneRect()
+        if scene.width() <= 0.0 or scene.height() <= 0.0:
+            return (0.5, 0.5), (1.0, 1.0)
+        visible = self.mapToScene(self.viewport().rect()).boundingRect()
+        clipped = visible.intersected(scene)
+        if clipped.isNull():
+            clipped = QRectF(scene)
+        center_x = (clipped.center().x() - scene.left()) / max(scene.width(), 1e-6)
+        center_y = (clipped.center().y() - scene.top()) / max(scene.height(), 1e-6)
+        frac_x = clipped.width() / max(scene.width(), 1e-6)
+        frac_y = clipped.height() / max(scene.height(), 1e-6)
+        center_x = float(np.clip(center_x, 0.0, 1.0))
+        center_y = float(np.clip(center_y, 0.0, 1.0))
+        frac_x = float(np.clip(frac_x, 0.05, 1.0))
+        frac_y = float(np.clip(frac_y, 0.05, 1.0))
+        return (center_x, center_y), (frac_x, frac_y)
+
+    def _emit_view_window_changed(self) -> None:
+        if self._suspend_view_window_signal:
+            return
+        center, frac = self.normalized_view_window()
+        self.viewWindowChanged.emit(center[0], center[1], frac[0], frac[1])
+
+    def _schedule_view_window_changed(self) -> None:
+        if self._suspend_view_window_signal:
+            return
+        self._view_window_timer.start(0)
+
+    def suspend_view_window_signal(self, enabled: bool) -> None:
+        self._suspend_view_window_signal = bool(enabled)
 
     def set_mask_opacity(self, opacity: float) -> None:
         """Set mask opacity as a fraction from 0 to 1."""

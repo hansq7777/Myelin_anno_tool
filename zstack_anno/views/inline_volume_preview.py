@@ -10,16 +10,16 @@ from PyQt5.QtWidgets import QWidget
 
 
 _MAX_IMAGE_SIZE = 720
-_MAX_RAW_POINTS = 18000
-_MAX_MASK_POINTS = 12000
-_MAX_INTERACTIVE_RAW_POINTS = 7000
-_MAX_INTERACTIVE_MASK_POINTS = 4500
-_MAX_VOXELS = 900_000
-_TARGET_SHAPE_ZYX = (64, 128, 128)
+_MAX_RAW_POINTS = 36000
+_MAX_MASK_POINTS = 22000
+_MAX_INTERACTIVE_RAW_POINTS = 12000
+_MAX_INTERACTIVE_MASK_POINTS = 7000
+_MAX_VOXELS = 1_500_000
+_TARGET_SHAPE_ZYX = (80, 192, 192)
 _ROTATION_SENSITIVITY_DEG = 0.55
 _MAX_PITCH_OFFSET_DEG = 82.0
 _MIN_VIEW_ZOOM = 1.0
-_MAX_VIEW_ZOOM = 6.0
+_MAX_VIEW_ZOOM = 12.0
 _WHEEL_ZOOM_FACTOR = 1.14
 VIEW_MODE_LABELS = (
     ("oblique", "Oblique"),
@@ -200,6 +200,27 @@ class InlineVolumePreview(QWidget):
         if emit_signal:
             self.zoomAdjusted.emit(new_zoom / max(old_zoom, 1e-9))
         return float(self._view_zoom)
+
+    def set_planar_view_window(
+        self,
+        *,
+        center_xy_norm: tuple[float, float],
+        visible_fraction_xy: tuple[float, float],
+    ) -> None:
+        center = np.clip(np.asarray(center_xy_norm, dtype=np.float32), 0.0, 1.0)
+        visible = np.clip(np.asarray(visible_fraction_xy, dtype=np.float32), 0.05, 1.0)
+        target_zoom = float(
+            np.clip(1.0 / max(float(visible[0]), float(visible[1]), 1e-6), _MIN_VIEW_ZOOM, _MAX_VIEW_ZOOM)
+        )
+        changed = (
+            abs(float(self._view_zoom) - target_zoom) > 1e-4
+            or not np.allclose(self._view_center_norm, center, atol=1e-4)
+        )
+        self._view_zoom = target_zoom
+        self._view_center_norm = center
+        self._clamp_view_center()
+        if changed:
+            self.update()
 
     def reset_view_rotation(self) -> None:
         self._yaw_offset_deg = 0.0
@@ -817,24 +838,35 @@ def _select_raw_points(
     arr = np.asarray(raw_small, dtype=np.float32)
     if arr.size == 0:
         return np.empty((0, 3), dtype=np.float32), np.empty((0,), dtype=np.float32)
-    lo = float(np.percentile(arr, 70.0))
-    hi = float(np.percentile(arr, 99.7))
+    lo = float(np.percentile(arr, 55.0))
+    hi = float(np.percentile(arr, 99.8))
     if hi <= lo:
         hi = float(arr.max())
     if hi <= lo:
         return np.empty((0, 3), dtype=np.float32), np.empty((0,), dtype=np.float32)
     norm = np.clip((arr - lo) / (hi - lo), 0.0, 1.0)
-    candidates = np.flatnonzero(norm >= 0.18)
+    structural = _normalized_gradient_score(arr)
+    score = np.maximum(norm, 0.68 * norm + 0.42 * structural)
+    candidates = np.flatnonzero(score >= 0.1)
+    if candidates.size == 0:
+        candidates = np.flatnonzero(norm >= 0.08)
     if candidates.size == 0:
         return np.empty((0, 3), dtype=np.float32), np.empty((0,), dtype=np.float32)
-    values = norm.ravel()[candidates]
-    if candidates.size > _MAX_RAW_POINTS:
-        select_idx = np.argpartition(values, -_MAX_RAW_POINTS)[-_MAX_RAW_POINTS:]
-        candidates = candidates[select_idx]
-        values = values[select_idx]
-    coords_zyx = np.column_stack(np.unravel_index(candidates, norm.shape)).astype(np.float32)
+    flat_score = score.ravel()
+    coords_zyx = np.column_stack(np.unravel_index(candidates, norm.shape)).astype(np.int32)
+    values = flat_score[candidates].astype(np.float32)
+    keep_idx = _select_indices_with_spatial_coverage(
+        coords_zyx,
+        values,
+        norm.shape,
+        _MAX_RAW_POINTS,
+        preferred_bins=(6, 12, 12),
+        per_cell_quota=2,
+    )
+    coords_zyx = coords_zyx[keep_idx].astype(np.float32)
+    values = values[keep_idx]
     points = _coords_zyx_to_xyz(coords_zyx, spacing_xyz)
-    return points, values.astype(np.float32)
+    return points, values
 
 
 def _select_mask_points(
@@ -846,10 +878,17 @@ def _select_mask_points(
     mask = np.asarray(mask_small) > 0
     if not mask.any():
         return np.empty((0, 3), dtype=np.float32)
-    coords_zyx = np.argwhere(mask)
-    if coords_zyx.shape[0] > _MAX_MASK_POINTS:
-        stride = int(math.ceil(coords_zyx.shape[0] / _MAX_MASK_POINTS))
-        coords_zyx = coords_zyx[::stride]
+    surface = _surface_mask_zyx(mask)
+    coords_zyx = np.argwhere(surface if surface.any() else mask).astype(np.int32)
+    keep_idx = _select_indices_with_spatial_coverage(
+        coords_zyx,
+        np.ones((coords_zyx.shape[0],), dtype=np.float32),
+        mask.shape,
+        _MAX_MASK_POINTS,
+        preferred_bins=(6, 12, 12),
+        per_cell_quota=3,
+    )
+    coords_zyx = coords_zyx[keep_idx].astype(np.float32)
     return _coords_zyx_to_xyz(coords_zyx.astype(np.float32), spacing_xyz)
 
 
@@ -863,10 +902,80 @@ def _limit_point_cloud(
         return np.empty((0, 3), dtype=np.float32), empty_intensity
     if points_xyz.shape[0] <= max_points:
         return points_xyz, intensity
-    stride = int(math.ceil(points_xyz.shape[0] / max_points))
-    limited_points = points_xyz[::stride]
-    limited_intensity = None if intensity is None else intensity[::stride]
+    indices = np.linspace(0, points_xyz.shape[0] - 1, num=max_points, dtype=np.int32)
+    limited_points = points_xyz[indices]
+    limited_intensity = None if intensity is None else intensity[indices]
     return limited_points, limited_intensity
+
+
+def _normalized_gradient_score(arr: np.ndarray) -> np.ndarray:
+    if arr.size == 0 or min(arr.shape) <= 1:
+        return np.zeros_like(arr, dtype=np.float32)
+    grad_z, grad_y, grad_x = np.gradient(arr, edge_order=1)
+    grad = np.sqrt(0.35 * grad_z * grad_z + grad_y * grad_y + grad_x * grad_x, dtype=np.float32)
+    lo = float(np.percentile(grad, 55.0))
+    hi = float(np.percentile(grad, 99.7))
+    if hi <= lo:
+        return np.zeros_like(arr, dtype=np.float32)
+    return np.clip((grad - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+
+
+def _surface_mask_zyx(mask: np.ndarray) -> np.ndarray:
+    if mask.ndim != 3 or not mask.any():
+        return np.asarray(mask, dtype=bool)
+    interior = mask.copy()
+    interior[1:-1, 1:-1, 1:-1] = (
+        mask[1:-1, 1:-1, 1:-1]
+        & mask[:-2, 1:-1, 1:-1]
+        & mask[2:, 1:-1, 1:-1]
+        & mask[1:-1, :-2, 1:-1]
+        & mask[1:-1, 2:, 1:-1]
+        & mask[1:-1, 1:-1, :-2]
+        & mask[1:-1, 1:-1, 2:]
+    )
+    return mask & ~interior
+
+
+def _select_indices_with_spatial_coverage(
+    coords_zyx: np.ndarray,
+    scores: np.ndarray,
+    shape_zyx: tuple[int, int, int],
+    max_points: int,
+    *,
+    preferred_bins: tuple[int, int, int],
+    per_cell_quota: int,
+) -> np.ndarray:
+    if coords_zyx.shape[0] <= max_points:
+        return np.arange(coords_zyx.shape[0], dtype=np.int32)
+    shape = np.maximum(1, np.asarray(shape_zyx, dtype=np.int32))
+    bins = np.maximum(1, np.minimum(np.asarray(preferred_bins, dtype=np.int32), shape))
+    order = np.argsort(scores.astype(np.float32), kind="stable")[::-1]
+    coords = coords_zyx[order]
+    cell_z = np.minimum((coords[:, 0] * bins[0]) // shape[0], bins[0] - 1)
+    cell_y = np.minimum((coords[:, 1] * bins[1]) // shape[1], bins[1] - 1)
+    cell_x = np.minimum((coords[:, 2] * bins[2]) // shape[2], bins[2] - 1)
+    num_cells = int(bins[0] * bins[1] * bins[2])
+    cell_ids = (cell_z * bins[1] * bins[2] + cell_y * bins[2] + cell_x).astype(np.int32)
+    counts = np.zeros((num_cells,), dtype=np.int16)
+    kept_positions: list[int] = []
+    used = np.zeros((order.shape[0],), dtype=bool)
+
+    for quota in range(1, max(1, int(per_cell_quota)) + 1):
+        for pos, cell_id in enumerate(cell_ids):
+            if used[pos] or counts[cell_id] >= quota:
+                continue
+            kept_positions.append(pos)
+            used[pos] = True
+            counts[cell_id] += 1
+            if len(kept_positions) >= max_points:
+                return order[np.asarray(kept_positions, dtype=np.int32)]
+
+    if len(kept_positions) < max_points:
+        remaining = np.flatnonzero(~used)
+        if remaining.size:
+            fill = remaining[: max_points - len(kept_positions)]
+            kept_positions.extend(fill.tolist())
+    return order[np.asarray(kept_positions[:max_points], dtype=np.int32)]
 
 
 def _coords_zyx_to_xyz(coords_zyx: np.ndarray, spacing_xyz: tuple[float, float, float]) -> np.ndarray:

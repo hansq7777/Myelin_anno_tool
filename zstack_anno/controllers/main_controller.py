@@ -97,6 +97,7 @@ class MainController(
         self.installEventFilter(self)
         self.canvas.installEventFilter(self)
         self.canvas.zoomAdjusted.connect(self._sync_inline_zoom_from_canvas)
+        self.canvas.viewWindowChanged.connect(self._sync_inline_view_window_from_canvas)
         # Also filter events from the canvas viewport for painting
         self.canvas.viewport().installEventFilter(self)
         self.slider.installEventFilter(self)
@@ -651,10 +652,28 @@ class MainController(
     def _sync_inline_zoom_from_canvas(self, factor: float) -> None:
         if not getattr(self, "_inline_volume_enabled", False):
             return
+        if (self.inline_view_combo.currentData() or "xy") == "xy":
+            return
         self.inline_volume_preview.apply_zoom_factor(float(factor), emit_signal=False)
 
     def _sync_canvas_zoom_from_inline(self, factor: float) -> None:
         self.canvas.apply_zoom_factor(float(factor), emit_signal=False)
+
+    def _sync_inline_view_window_from_canvas(
+        self,
+        center_x_norm: float,
+        center_y_norm: float,
+        frac_x: float,
+        frac_y: float,
+    ) -> None:
+        if not getattr(self, "_inline_volume_enabled", False):
+            return
+        if (self.inline_view_combo.currentData() or "xy") != "xy":
+            return
+        self.inline_volume_preview.set_planar_view_window(
+            center_xy_norm=(float(center_x_norm), float(center_y_norm)),
+            visible_fraction_xy=(float(frac_x), float(frac_y)),
+        )
 
     def _refresh_inline_volume_preview(self) -> None:
         if not getattr(self, "_inline_volume_enabled", False):
@@ -686,6 +705,13 @@ class MainController(
             self._inline_preview_volume_signature = volume_signature
         else:
             self.inline_volume_preview.set_view_mode(view_mode)
+        center_xy, visible_xy = self.canvas.normalized_view_window()
+        self._sync_inline_view_window_from_canvas(
+            center_xy[0],
+            center_xy[1],
+            visible_xy[0],
+            visible_xy[1],
+        )
         self._refresh_inline_volume_locator()
 
     def _refresh_inline_volume_locator(self) -> None:
