@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene
-from PyQt5.QtGui import QColor, QPainter, QPixmap, QImage, QTransform
+from PyQt5.QtGui import QColor, QCursor, QPainter, QPixmap, QImage, QTransform
 from PyQt5.QtCore import Qt, QRectF, QTimer, pyqtSignal
 import numpy as np
 
@@ -32,6 +32,9 @@ class SliceCanvas(QGraphicsView):
         self._review_badge_text = ""
         self._review_badge_done = False
         self._suspend_view_window_signal = False
+        self._middle_pan_active = False
+        self._middle_pan_last_pos = None
+        self._middle_pan_restore_cursor = None
         self._view_window_timer = QTimer(self)
         self._view_window_timer.setSingleShot(True)
         self._view_window_timer.timeout.connect(self._emit_view_window_changed)
@@ -111,10 +114,50 @@ class SliceCanvas(QGraphicsView):
         super().resizeEvent(event)
         self._schedule_view_window_changed()
 
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MiddleButton:
+            self._middle_pan_active = True
+            self._middle_pan_last_pos = event.pos()
+            self._middle_pan_restore_cursor = QCursor(self.viewport().cursor())
+            self.viewport().setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._middle_pan_active and self._middle_pan_last_pos is not None:
+            delta = event.pos() - self._middle_pan_last_pos
+            self._middle_pan_last_pos = event.pos()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - int(delta.x()))
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - int(delta.y()))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MiddleButton and self._middle_pan_active:
+            self._middle_pan_active = False
+            self._middle_pan_last_pos = None
+            if self._middle_pan_restore_cursor is not None:
+                self.viewport().setCursor(self._middle_pan_restore_cursor)
+            else:
+                self.viewport().unsetCursor()
+            self._middle_pan_restore_cursor = None
+            self._emit_view_window_changed()
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
         if event.button() == Qt.LeftButton:
             self._emit_view_window_changed()
+
+    def focusOutEvent(self, event) -> None:
+        had_middle_pan = self._middle_pan_active
+        self._middle_pan_active = False
+        self._middle_pan_last_pos = None
+        self._middle_pan_restore_cursor = None
+        if had_middle_pan:
+            self.viewport().unsetCursor()
+        super().focusOutEvent(event)
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)

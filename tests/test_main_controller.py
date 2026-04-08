@@ -17,11 +17,11 @@ if importlib.util.find_spec("PyQt5") is None:
     pytest.skip("PyQt5 not available", allow_module_level=True)
 
 import numpy as np
-from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt5.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PyQt5.QtGui import QKeyEvent, QMouseEvent
 from PyQt5.QtWidgets import QApplication
 
-from zstack_anno.controllers.main_controller import MainController
+from zstack_anno.controllers.main_controller import MainController, _window_geometry_for_available_rect
 from zstack_anno.utils.volume_utils import VolumeSource
 import zstack_anno.controllers.morphology_helper as morphology_helper
 import zstack_anno.controllers.review_helper as review_helper
@@ -124,6 +124,64 @@ def test_p_brush_and_l_eraser_apply_expected_paint_values(controller, app):
     app.processEvents()
 
     assert controller.model.get_mask(0)[10, 10] == 0
+
+
+def test_window_geometry_for_available_rect_stays_within_screen():
+    rect = _window_geometry_for_available_rect(QRect(0, 0, 1366, 768))
+
+    assert rect.width() <= 1366
+    assert rect.height() <= 768
+    assert rect.left() >= 0
+    assert rect.top() >= 0
+    assert rect.right() <= 1365
+    assert rect.bottom() <= 767
+
+
+def test_main_controller_defaults_to_left_aligned_canvas():
+    widget = MainController()
+    try:
+        assert widget.canvas.alignment() & Qt.AlignLeft
+    finally:
+        widget.close()
+        widget.deleteLater()
+
+
+def test_middle_drag_temporarily_pans_canvas_while_brush_active(controller, app):
+    controller.resize(900, 700)
+    controller.show()
+    app.processEvents()
+    controller.model.data = np.zeros((1, 256, 256), dtype=np.uint8)
+    controller.model.original_data = controller.model.data.copy()
+    controller.model.ensure_masks()
+    controller._update_view(reset_view=True)
+    controller.canvas.apply_zoom_factor(4.0, emit_signal=False)
+    controller.eventFilter(controller, QKeyEvent(QEvent.KeyPress, Qt.Key_P, Qt.NoModifier))
+
+    before_center, _before_visible = controller.canvas.normalized_view_window()
+    before_h = controller.canvas.horizontalScrollBar().value()
+    before_v = controller.canvas.verticalScrollBar().value()
+    QApplication.sendEvent(
+        controller.canvas.viewport(),
+        _mouse_event(QEvent.MouseButtonPress, QPoint(140, 140), Qt.MiddleButton, Qt.MiddleButton),
+    )
+    QApplication.sendEvent(
+        controller.canvas.viewport(),
+        _mouse_event(QEvent.MouseMove, QPoint(220, 190), Qt.NoButton, Qt.MiddleButton),
+    )
+    QApplication.sendEvent(
+        controller.canvas.viewport(),
+        _mouse_event(QEvent.MouseButtonRelease, QPoint(220, 190), Qt.MiddleButton, Qt.NoButton),
+    )
+    app.processEvents()
+
+    after_center, _after_visible = controller.canvas.normalized_view_window()
+    after_h = controller.canvas.horizontalScrollBar().value()
+    after_v = controller.canvas.verticalScrollBar().value()
+    assert controller._paint_tool == controller._PAINT_TOOL_BRUSH
+    assert controller.brush_enabled is True
+    assert controller.model.get_mask(0).sum() == 0
+    assert after_h != before_h or after_v != before_v
+    assert after_center[0] != pytest.approx(before_center[0], abs=0.02) or after_center[1] != pytest.approx(before_center[1], abs=0.02)
 
 
 def test_p_l_and_h_toggle_expected_tool_modes(controller):

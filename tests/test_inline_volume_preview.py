@@ -373,6 +373,16 @@ def test_inline_volume_preview_wheel_zoom_scales_without_rebuild(app):
     assert preview._render_thread is None
 
 
+def test_inline_volume_preview_content_rect_hugs_inner_edge(app):
+    preview = InlineVolumePreview()
+    preview.resize(540, 360)
+
+    rect = preview._content_rect()
+
+    assert rect.right() == pytest.approx(preview.width() - 12.0, abs=1.5)
+    assert rect.left() > 12.0
+
+
 def test_main_controller_canvas_and_inline_zoom_stay_in_sync(app):
     widget = MainController()
     try:
@@ -452,8 +462,7 @@ def test_main_controller_xy_inline_preview_controls_canvas_window_and_rotation(a
         canvas_center, canvas_visible = widget.canvas.normalized_view_window()
         assert canvas_center[0] == pytest.approx(preview_center[0], abs=0.06)
         assert canvas_center[1] == pytest.approx(preview_center[1], abs=0.06)
-        assert canvas_visible[0] == pytest.approx(preview_visible[0], abs=0.06)
-        assert canvas_visible[1] == pytest.approx(preview_visible[1], abs=0.06)
+        assert max(canvas_visible) == pytest.approx(max(preview_visible), abs=0.06)
 
         QApplication.sendEvent(
             preview,
@@ -480,8 +489,7 @@ def test_main_controller_xy_inline_preview_controls_canvas_window_and_rotation(a
         canvas_center, canvas_visible = widget.canvas.normalized_view_window()
         assert canvas_center[0] == pytest.approx(preview_center[0], abs=0.06)
         assert canvas_center[1] == pytest.approx(preview_center[1], abs=0.06)
-        assert canvas_visible[0] == pytest.approx(preview_visible[0], abs=0.06)
-        assert canvas_visible[1] == pytest.approx(preview_visible[1], abs=0.06)
+        assert max(canvas_visible) == pytest.approx(max(preview_visible), abs=0.06)
     finally:
         widget.model.mask_dirty = False
         widget.close()

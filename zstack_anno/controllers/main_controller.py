@@ -39,6 +39,22 @@ from .review_helper import ReviewMixin
 from .volume_helper import VolumeMixin
 
 
+def _window_geometry_for_available_rect(available: QRect) -> QRect:
+    width = min(
+        available.width(),
+        max(980, int(round(available.width() * (0.985 if available.width() < 1600 else 0.96)))),
+    )
+    height = min(
+        available.height(),
+        max(700, int(round(available.height() * 0.94))),
+    )
+    width = max(720, min(width, available.width()))
+    height = max(560, min(height, available.height()))
+    x = available.x() + max(0, (available.width() - width) // 2)
+    y = available.y() + max(0, (available.height() - height) // 2)
+    return QRect(int(x), int(y), int(width), int(height))
+
+
 class MainController(
     QMainWindow,
     FileOpsMixin,
@@ -54,8 +70,10 @@ class MainController(
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Z-Stack Annotation (alpha)")
+        self._initial_screen_fit_done = False
         self.model = ZStackModel()
         self.canvas = SliceCanvas()
+        self.canvas.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.undo_stack: list[tuple[np.ndarray | None, float, str]] = []
         self.redo_stack: list[tuple[np.ndarray | None, float, str]] = []
         self.history: list[str] = []
@@ -156,7 +174,15 @@ class MainController(
         nav_layout.addWidget(self.inline_view_combo)
         layout.addLayout(nav_layout)
 
-        review_layout = QHBoxLayout()
+        review_primary_layout = QHBoxLayout()
+        review_primary_layout.setContentsMargins(0, 0, 0, 0)
+        review_primary_layout.setSpacing(6)
+        review_secondary_layout = QHBoxLayout()
+        review_secondary_layout.setContentsMargins(0, 0, 0, 0)
+        review_secondary_layout.setSpacing(6)
+        review_layout = QVBoxLayout()
+        review_layout.setContentsMargins(0, 0, 0, 0)
+        review_layout.setSpacing(4)
         self.review_build_btn = QPushButton("Build Tracker")
         self.review_build_btn.clicked.connect(self._review_build_tracker_from_folders)
         self.review_open_btn = QPushButton("Open Review Tracker")
@@ -199,27 +225,30 @@ class MainController(
         self.quick_auto_revert_btn.clicked.connect(self._restore_quick_auto_snapshot)
         self.quick_auto_revert_btn.setEnabled(False)
         self.review_info_label = QLabel("Review: tracker not loaded")
-        review_layout.addWidget(self.review_build_btn)
-        review_layout.addWidget(self.review_open_btn)
-        review_layout.addWidget(self.review_prev_stack_btn)
-        review_layout.addWidget(self.review_next_stack_btn)
-        review_layout.addWidget(self.review_next_unreviewed_btn)
-        review_layout.addWidget(QLabel("Filter"))
-        review_layout.addWidget(self.review_filter_combo)
-        review_layout.addWidget(QLabel("Grade"))
-        review_layout.addWidget(self.review_grade_combo)
-        review_layout.addWidget(self.review_mark_a_btn)
-        review_layout.addWidget(self.review_mark_b_btn)
-        review_layout.addWidget(self.review_mark_c_btn)
-        review_layout.addWidget(self.review_save_corrected_btn)
-        review_layout.addWidget(self.review_export_final_btn)
-        review_layout.addWidget(QLabel("Auto Preset"))
-        review_layout.addWidget(self.quick_auto_preset_combo)
-        review_layout.addWidget(self.quick_auto_btn)
-        review_layout.addWidget(self.quick_auto_stack_btn)
-        review_layout.addWidget(self.quick_auto_cancel_btn)
-        review_layout.addWidget(self.quick_auto_revert_btn)
-        review_layout.addWidget(self.review_info_label, 1)
+        review_primary_layout.addWidget(self.review_build_btn)
+        review_primary_layout.addWidget(self.review_open_btn)
+        review_primary_layout.addWidget(self.review_prev_stack_btn)
+        review_primary_layout.addWidget(self.review_next_stack_btn)
+        review_primary_layout.addWidget(self.review_next_unreviewed_btn)
+        review_primary_layout.addWidget(QLabel("Filter"))
+        review_primary_layout.addWidget(self.review_filter_combo)
+        review_primary_layout.addWidget(QLabel("Grade"))
+        review_primary_layout.addWidget(self.review_grade_combo)
+        review_primary_layout.addWidget(self.review_mark_a_btn)
+        review_primary_layout.addWidget(self.review_mark_b_btn)
+        review_primary_layout.addWidget(self.review_mark_c_btn)
+        review_primary_layout.addWidget(self.review_save_corrected_btn)
+        review_primary_layout.addWidget(self.review_export_final_btn)
+        review_primary_layout.addStretch(1)
+        review_secondary_layout.addWidget(QLabel("Auto Preset"))
+        review_secondary_layout.addWidget(self.quick_auto_preset_combo)
+        review_secondary_layout.addWidget(self.quick_auto_btn)
+        review_secondary_layout.addWidget(self.quick_auto_stack_btn)
+        review_secondary_layout.addWidget(self.quick_auto_cancel_btn)
+        review_secondary_layout.addWidget(self.quick_auto_revert_btn)
+        review_secondary_layout.addWidget(self.review_info_label, 1)
+        review_layout.addLayout(review_primary_layout)
+        review_layout.addLayout(review_secondary_layout)
         layout.addLayout(review_layout)
         self._set_review_controls_enabled(False)
 
@@ -359,6 +388,27 @@ class MainController(
         ctrl.addWidget(self.cursor_label)
         layout.addLayout(ctrl)
         self.setCentralWidget(central)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._initial_screen_fit_done:
+            return
+        self._initial_screen_fit_done = True
+        QTimer.singleShot(0, self._fit_to_available_screen)
+
+    def _fit_to_available_screen(self) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        screen = None
+        handle = self.windowHandle()
+        if handle is not None:
+            screen = handle.screen()
+        if screen is None:
+            screen = app.primaryScreen()
+        if screen is None:
+            return
+        self.setGeometry(_window_geometry_for_available_rect(screen.availableGeometry()))
 
     def _create_menu(self):
         file_menu = self.menuBar().addMenu("File")
@@ -648,8 +698,9 @@ class MainController(
             self.center_splitter.setSizes([0, max(1, self.center_splitter.width())])
             return
         total = max(sum(self.center_splitter.sizes()), self.center_splitter.width(), 960)
-        left = max(300, total // 3)
-        self.center_splitter.setSizes([left, max(420, total - left)])
+        left = max(360, int(total * 0.42))
+        right = max(460, total - left)
+        self.center_splitter.setSizes([left, right])
         self._schedule_inline_volume_preview_refresh(delay_ms=10)
 
     def _on_inline_view_changed(self, _index: int) -> None:
@@ -1198,6 +1249,7 @@ class MainController(
             "  L - toggle eraser tool (erase foreground)\n"
             "  [ and ] - change brush size\n"
             "  H - hand tool (panning)\n"
+            "  Middle drag - temporary pan in the 2D view without leaving brush/eraser\n"
             "  Hold D + left drag - box delete with preview\n\n"
             "Toolbar Buttons:\n"
             "  Prev/Next - move one slice backward or forward\n"

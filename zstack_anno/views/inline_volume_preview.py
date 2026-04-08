@@ -601,7 +601,7 @@ class InlineVolumePreview(QWidget):
         width = max(40.0, float(self.width()) - 2.0 * margin)
         height = max(40.0, float(self.height()) - margin - footer)
         size = min(width, height)
-        left = margin + (width - size) / 2.0
+        left = margin + (width - size)
         top = margin + (height - size) / 2.0
         return QRectF(left, top, size, size)
 
